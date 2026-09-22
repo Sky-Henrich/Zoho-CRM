@@ -52,6 +52,17 @@ if(body != null && body != "")
 			{
 				bdUserIdBracket = fieldValue;
 			}
+			// ---- SUBSCRIPTION_UPDATED_WEBHOOK PATCH ----
+			// The "subscription_updated" webhook (admin edits a member's
+			// billing/subscription - amount, next due date, etc.) uses a
+			// "member[user_id]" key instead of "user[user_id]"/"user_id".
+			// Reuses the same bdUserIdBracket fallback so this webhook type
+			// resolves a BD member ID the same way member_update payloads do.
+			else if(fieldKey == "member[user_id]")
+			{
+				bdUserIdBracket = fieldValue;
+			}
+			// -----------------------------------------
 			else if(fieldKey == "old_user[user_id]")
 			{
 				bdUserIdOldBracket = fieldValue;
