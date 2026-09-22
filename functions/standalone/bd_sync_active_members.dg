@@ -859,13 +859,32 @@ try
 		// condition. targetStage picks which Deal stage this run should
 		// produce/enforce: "Sales Outreach" for the five listing plans,
 		// "Closed Won" for genuine paid plans.
-		else if((userActive == 2 || userActive == "2") && (isSalesOutreachListingPlan == true || transactionIsPaid == true && isFreeListingPlan == false))
+		// ---- FREE_TRIAL_STAGE PATCH (1 of 2) ----
+		// Also widened to catch a paid-tier plan (Verificado/Impulso, not one
+		// of the five free listing plans) that's currently on a $0 free
+		// trial - transactionIsPaid can be false for these (no real
+		// transaction yet), which would otherwise fall all the way through
+		// to "skipped" below and never touch the Deal at all. safeAmount==0
+		// (or unresolved) admits that case here so it can be marked as the
+		// "Free Trial" stage instead of being silently skipped.
+		else if((userActive == 2 || userActive == "2") && (isSalesOutreachListingPlan == true || isFreeListingPlan == false && (transactionIsPaid == true || safeAmount == null || safeAmount == 0)))
 		{
 			targetStage = "Closed Won";
 			if(isSalesOutreachListingPlan == true)
 			{
 				targetStage = "Sales Outreach";
 			}
+			// ---- FREE_TRIAL_STAGE PATCH (2 of 2) ----
+			// We offer a free trial on paid-tier plans - a $0 amount on a
+			// non-listing plan means the member is currently on that trial,
+			// not an actual paid conversion, so the Deal should reflect
+			// "Free Trial" rather than "Closed Won" until a real payment
+			// comes through.
+			else if(safeAmount == null || safeAmount == 0)
+			{
+				targetStage = "Free Trial";
+			}
+			// -----------------------------------------
 			// ==================================================================================
 			try
 			{
