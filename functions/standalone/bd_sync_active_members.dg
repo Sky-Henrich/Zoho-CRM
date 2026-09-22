@@ -643,6 +643,12 @@ try
 							acctUpdate.put("Current_Plan",mappedPlan);
 							acctUpdate.put("Top_Category",topCategoryValue);
 							acctUpdate.put("BD_Member_ID",bdUserId);
+							// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+							if(bdProfileUrl != null && bdProfileUrl != "")
+							{
+								acctUpdate.put("BD_Profile_URL",bdProfileUrl);
+							}
+							// -----------------------------------------
 							// ---- VERIFIED_MEMBER_SYNC PATCH (3 of 20) ----
 							if(mappedVerifiedMember != null && mappedVerifiedMember != "")
 							{
@@ -661,6 +667,12 @@ try
 							acctCreate.put("Current_Plan",mappedPlan);
 							acctCreate.put("Top_Category",topCategoryValue);
 							acctCreate.put("BD_Member_ID",bdUserId);
+							// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+							if(bdProfileUrl != null && bdProfileUrl != "")
+							{
+								acctCreate.put("BD_Profile_URL",bdProfileUrl);
+							}
+							// -----------------------------------------
 							// ---- VERIFIED_MEMBER_SYNC PATCH (4 of 20) ----
 							if(mappedVerifiedMember != null && mappedVerifiedMember != "")
 							{
@@ -883,6 +895,12 @@ try
 						acctUpdate.put("Current_Plan",mappedPlan);
 						acctUpdate.put("Top_Category",topCategoryValue);
 						acctUpdate.put("BD_Member_ID",bdUserId);
+						// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+						if(bdProfileUrl != null && bdProfileUrl != "")
+						{
+							acctUpdate.put("BD_Profile_URL",bdProfileUrl);
+						}
+						// -----------------------------------------
 						// ---- VERIFIED_MEMBER_SYNC PATCH (7 of 20) ----
 						if(mappedVerifiedMember != null && mappedVerifiedMember != "")
 						{
@@ -926,6 +944,12 @@ try
 						acctCreate.put("Current_Plan",mappedPlan);
 						acctCreate.put("Top_Category",topCategoryValue);
 						acctCreate.put("BD_Member_ID",bdUserId);
+						// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+						if(bdProfileUrl != null && bdProfileUrl != "")
+						{
+							acctCreate.put("BD_Profile_URL",bdProfileUrl);
+						}
+						// -----------------------------------------
 						// ---- VERIFIED_MEMBER_SYNC PATCH (8 of 20) ----
 						if(mappedVerifiedMember != null && mappedVerifiedMember != "")
 						{
@@ -988,6 +1012,12 @@ try
 					{
 						updateMap.put("Top_Category",topCategoryValue);
 					}
+					// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+					if(bdProfileUrl != null && bdProfileUrl != "")
+					{
+						updateMap.put("BD_Profile_URL",bdProfileUrl);
+					}
+					// -----------------------------------------
 					// ---- PILLAR_MONTHLY_IMPULSO PATCH (existing Deal update) ----
 					if(pillarMonthlyImpulsoEN != null && pillarMonthlyImpulsoEN != "")
 					{
@@ -1337,6 +1367,12 @@ try
 						{
 							dealDetails.put("Top_Category",topCategoryValue);
 						}
+						// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+						if(bdProfileUrl != null && bdProfileUrl != "")
+						{
+							dealDetails.put("BD_Profile_URL",bdProfileUrl);
+						}
+						// -----------------------------------------
 						// ---- PILLAR_MONTHLY_IMPULSO PATCH (lead->deal conversion) ----
 						if(pillarMonthlyImpulsoEN != null && pillarMonthlyImpulsoEN != "")
 						{
@@ -1406,6 +1442,12 @@ try
 								{
 									dealFixMap.put("Top_Category",topCategoryValue);
 								}
+								// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+								if(bdProfileUrl != null && bdProfileUrl != "")
+								{
+									dealFixMap.put("BD_Profile_URL",bdProfileUrl);
+								}
+								// -----------------------------------------
 								// ---- PILLAR_MONTHLY_IMPULSO PATCH (post-conversion force-sync) ----
 								if(pillarMonthlyImpulsoEN != null && pillarMonthlyImpulsoEN != "")
 								{
@@ -1623,6 +1665,12 @@ try
 						{
 							dealMap.put("Top_Category",topCategoryValue);
 						}
+						// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+						if(bdProfileUrl != null && bdProfileUrl != "")
+						{
+							dealMap.put("BD_Profile_URL",bdProfileUrl);
+						}
+						// -----------------------------------------
 						// ---- PILLAR_MONTHLY_IMPULSO PATCH (direct Deal creation) ----
 						if(pillarMonthlyImpulsoEN != null && pillarMonthlyImpulsoEN != "")
 						{
