@@ -992,26 +992,58 @@ try
 									type :GET
 									connection:"bd_sync_blueprint_connection"
 								];
-								bpDataList = bpGetResp.get("blueprint");
-								if(bpDataList != null && bpDataList.size() > 0)
+								// ---- BLUEPRINT_RESPONSE_SHAPE PATCH ----
+								// Zoho's GET .../actions/blueprint response nests the
+								// transitions list one level differently depending on
+								// API version/module - "blueprint" can come back as a
+								// single object OR as a one-item list, and the
+								// transitions key itself can be "transition" or
+								// "transitions". Handle both without assuming, and if
+								// neither is found, log the raw response instead of
+								// crashing so the actual shape is visible for a fix
+								// rather than guessed at again.
+								bpBlueprintNode = bpGetResp.get("blueprint");
+								bpFirstEntry = null;
+								if(bpBlueprintNode != null)
 								{
-									bpTransitions = bpDataList.get(0).get("transitions");
-									if(bpTransitions != null)
+									bpListEntry = bpBlueprintNode.get(0);
+									if(bpListEntry != null)
 									{
-										for each  bpTransition in bpTransitions
+										bpFirstEntry = bpListEntry;
+									}
+									else
+									{
+										bpFirstEntry = bpBlueprintNode;
+									}
+								}
+								bpTransitions = null;
+								if(bpFirstEntry != null)
+								{
+									bpTransitions = bpFirstEntry.get("transition");
+									if(bpTransitions == null)
+									{
+										bpTransitions = bpFirstEntry.get("transitions");
+									}
+								}
+								if(bpTransitions != null)
+								{
+									for each  bpTransition in bpTransitions
+									{
+										bpTransitionName = bpTransition.get("name");
+										if(bpAvailableNames != "")
 										{
-											bpTransitionName = bpTransition.get("name");
-											if(bpAvailableNames != "")
-											{
-												bpAvailableNames = bpAvailableNames + ", ";
-											}
-											bpAvailableNames = bpAvailableNames + bpTransitionName;
-											if(bpTransitionName != null && bpTransitionName.toString().trim().equalsIgnoreCase(targetStage))
-											{
-												bpTransitionId = bpTransition.get("id");
-											}
+											bpAvailableNames = bpAvailableNames + ", ";
+										}
+										bpAvailableNames = bpAvailableNames + bpTransitionName;
+										if(bpTransitionName != null && bpTransitionName.toString().trim().equalsIgnoreCase(targetStage))
+										{
+											bpTransitionId = bpTransition.get("id");
 										}
 									}
+								}
+								else
+								{
+									resultLog = resultLog + "WARNING: could not locate a transitions list in the Blueprint GET response for BD ID " + bdUserId + " - raw response: " + bpGetResp + "\n";
 								}
 								if(bpTransitionId != null && bpTransitionId != "")
 								{
@@ -1045,8 +1077,24 @@ try
 									}
 									else
 									{
-										bpPutData = bpPutResp.get("blueprint");
-										if(bpPutData != null && bpPutData.size() > 0 && bpPutData.get(0).get("status") == "error")
+										// Same dual-shape handling as the GET parsing above -
+										// "blueprint" here can also come back as a single
+										// object rather than a one-item list.
+										bpPutBlueprintNode = bpPutResp.get("blueprint");
+										bpPutFirstEntry = null;
+										if(bpPutBlueprintNode != null)
+										{
+											bpPutListEntry = bpPutBlueprintNode.get(0);
+											if(bpPutListEntry != null)
+											{
+												bpPutFirstEntry = bpPutListEntry;
+											}
+											else
+											{
+												bpPutFirstEntry = bpPutBlueprintNode;
+											}
+										}
+										if(bpPutFirstEntry != null && bpPutFirstEntry.get("status") == "error")
 										{
 											bpTransitionOk = false;
 										}
@@ -1067,7 +1115,7 @@ try
 							}
 							catch (bpError)
 							{
-								resultLog = resultLog + "WARNING: Blueprint transition attempt FAILED for BD ID " + bdUserId + " - " + bpError + " (confirm the 'bd_sync_blueprint_connection' Connection exists under Setup > Developer Space > Connections with CRM scope)\n";
+								resultLog = resultLog + "WARNING: Blueprint transition attempt FAILED for BD ID " + bdUserId + " - " + bpError + "\n";
 							}
 						}
 						else if(stageUpdateResp != null && stageUpdateResp.get("status") == "error")
