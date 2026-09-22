@@ -1,1 +1,1301 @@
-
+string standalone.bd_sync_active_members1(String crmAPIRequest)
+{
+info crmAPIRequest;
+apiKey = "cba141e28d8732f858dd0b7c514e026f";
+resultLog = "";
+bdUserId = "";
+bdSignupDateRaw = "";
+bdMemberTypeRaw = "";
+bdWebsiteRaw = "";
+bdCityRaw = "";
+bdAddress1Raw = "";
+bdAddress2Raw = "";
+// ==================== VERIFIED_MEMBER_SYNC PATCH (added) ====================
+// Ported over from bd_sync_active_members so mappedVerifiedMember (used by the
+// VERIFIED_LEAD_INSTANT_CONVERT block below) actually exists in this script.
+bdVerifiedRaw = "";
+bdOldVerifiedFound = false;
+// ==============================================================================
+body = crmAPIRequest.get("body");
+if(body != null && body != "")
+{
+	pairs = body.toString().toList("&");
+	for each  pair in pairs
+	{
+		eqIndex = pair.indexOf("=");
+		if(eqIndex > -1)
+		{
+			fieldKey = pair.substring(0,eqIndex);
+			fieldValue = pair.substring(eqIndex + 1);
+			if(fieldKey == "user_id")
+			{
+				bdUserId = fieldValue;
+			}
+			else if(fieldKey == "signup_date")
+			{
+				bdSignupDateRaw = fieldValue;
+			}
+			else if(fieldKey == "cycle" || fieldKey == "member_type")
+			{
+				bdMemberTypeRaw = fieldValue;
+			}
+			// FIX: these were never captured before, so Website/City/
+			// Address silently dropped even when BD sent them in the
+			// member_contact_details_standard webhook body.
+			else if(fieldKey == "website")
+			{
+				bdWebsiteRaw = fieldValue;
+			}
+			else if(fieldKey == "city")
+			{
+				bdCityRaw = fieldValue;
+			}
+			else if(fieldKey == "address1")
+			{
+				bdAddress1Raw = fieldValue;
+			}
+			else if(fieldKey == "address2")
+			{
+				bdAddress2Raw = fieldValue;
+			}
+			// ==================== VERIFIED_MEMBER_SYNC PATCH (added) ====================
+			else if(fieldKey == "user[verified]")
+			{
+				// Sent by the "Admin Imports / Adds / Updates / Deletes Members" webhook
+				// (member_update payloads use bracketed keys, e.g. user[verified]=1).
+				bdVerifiedRaw = fieldValue;
+			}
+			else if(fieldKey == "old_user[verified]")
+			{
+				// BD's admin panel only includes "user[verified]" in the payload when
+				// the member IS verified (checkbox-style: checked -> sent, unchecked ->
+				// omitted entirely, never sent as 0/false). old_user[verified] being
+				// present tells us the member WAS verified immediately before this
+				// update, which lets us detect a true->false transition even though
+				// "false" is never sent explicitly as a value.
+				bdOldVerifiedFound = true;
+			}
+			// ==============================================================================
+		}
+	}
+}
+if(bdUserId == null || bdUserId == "")
+{
+	resultLog = resultLog + "No BD member ID found in incoming payload\n";
+	return resultLog;
+}
+subscriptionStartDate = null;
+if(bdSignupDateRaw != null && bdSignupDateRaw.length() == 14)
+{
+	try 
+	{
+		signupYear = bdSignupDateRaw.substring(0,4);
+		signupMonth = bdSignupDateRaw.substring(4,6);
+		signupDay = bdSignupDateRaw.substring(6,8);
+		signupDateFormatted = signupMonth + "-" + signupDay + "-" + signupYear;
+		subscriptionStartDate = signupDateFormatted.toDate("MM-dd-yyyy");
+	}
+	catch (signupDateError)
+	{
+		resultLog = resultLog + "WARNING: could not parse signup_date '" + bdSignupDateRaw + "' for BD ID " + bdUserId + "\n";
+		subscriptionStartDate = null;
+	}
+}
+paymentOptionValue = "";
+if(bdMemberTypeRaw != null)
+{
+	if(bdMemberTypeRaw.toLowerCase() == "yearly")
+	{
+		paymentOptionValue = "Annually";
+	}
+	else if(bdMemberTypeRaw.toLowerCase() == "monthly")
+	{
+		paymentOptionValue = "Monthly";
+	}
+}
+// ==================== VERIFIED_MEMBER_SYNC PATCH (added) ====================
+// Maps the "Verified Member?" admin-panel field to the CRM's Verified_Member
+// picklist value.
+//   - user[verified] present  -> use its value (normally "1")            -> YES
+//   - user[verified] absent, but old_user[verified] WAS present          -> NO
+//   - neither key ever appeared                                          -> leave
+//     mappedVerifiedMember blank, so unrelated webhook events never touch
+//     this field on records that have no verification history.
+mappedVerifiedMember = "";
+if(bdVerifiedRaw != null && bdVerifiedRaw != "")
+{
+	verifiedRawLower = bdVerifiedRaw.toString().trim().toLowerCase();
+	if(verifiedRawLower == "1" || verifiedRawLower == "yes" || verifiedRawLower == "true")
+	{
+		mappedVerifiedMember = "YES - Verified";
+	}
+	else if(verifiedRawLower == "0" || verifiedRawLower == "no" || verifiedRawLower == "false")
+	{
+		mappedVerifiedMember = "NO - Not Verified";
+	}
+	else
+	{
+		resultLog = resultLog + "WARNING: unrecognized verified value '" + bdVerifiedRaw + "' for BD ID " + bdUserId + "\n";
+	}
+}
+else if(bdOldVerifiedFound == true)
+{
+	mappedVerifiedMember = "NO - Not Verified";
+	resultLog = resultLog + "Verified Member inferred as NOT verified (field omitted from payload after previously being set) for BD ID " + bdUserId + "\n";
+}
+// ==============================================================================
+// ---------------------------------------------------------------
+// FIX: decode Website/City/Address captured from the webhook body.
+// Form-encoded values use "+" for spaces. This site double-percent-
+// encodes URL-type fields specifically (website=https%253A%252F%252F...
+// decodes once to %3A%2F%2F..., needs a second pass to become :// ),
+// so website gets decoded twice; city/address only need one pass.
+// If the body didn't carry these (e.g. the signup webhook, which
+// doesn't include them), fall back to whatever the BD API's
+// user/get response provides for the same keys.
+// ---------------------------------------------------------------
+bdWebsite = "";
+if(bdWebsiteRaw != null && bdWebsiteRaw != "")
+{
+	bdWebsite = bdWebsiteRaw.replaceAll("\\+"," ");
+	bdWebsite = zoho.encryption.urlDecode(bdWebsite);
+	bdWebsite = zoho.encryption.urlDecode(bdWebsite);
+}
+bdCity = "";
+if(bdCityRaw != null && bdCityRaw != "")
+{
+	bdCity = zoho.encryption.urlDecode(bdCityRaw.replaceAll("\\+"," "));
+}
+bdStreet = "";
+if(bdAddress1Raw != null && bdAddress1Raw != "")
+{
+	bdStreet = zoho.encryption.urlDecode(bdAddress1Raw.replaceAll("\\+"," "));
+}
+if(bdAddress2Raw != null && bdAddress2Raw != "")
+{
+	addr2Decoded = zoho.encryption.urlDecode(bdAddress2Raw.replaceAll("\\+"," "));
+	if(bdStreet != "")
+	{
+		bdStreet = bdStreet + ", " + addr2Decoded;
+	}
+	else
+	{
+		bdStreet = addr2Decoded;
+	}
+}
+planMap = Map();
+planMap.put("listing","Listing");
+planMap.put("visit listing","Visit Listing");
+planMap.put("experience listing","Experience Listing");
+planMap.put("stay listing","Stay Listing");
+planMap.put("live listing","Live Listing");
+planMap.put("relocate listing","Relocate Listing");
+planMap.put("experience verificado","Experience Verificado");
+planMap.put("experience impulso","Experience Impulso");
+planMap.put("stay verificado","Stay Verificado");
+planMap.put("stay impulso","Stay Impulso");
+planMap.put("live verificado","Live Verificado");
+planMap.put("live impulso","Live Impulso");
+planMap.put("visit verificado","Visit Verificado");
+planMap.put("visit impulso","Visit Impulso");
+planMap.put("relocate verificado","Relocate Verificado");
+planMap.put("relocate impulso","Relocate Impulso");
+planMap.put("individual","Individual");
+planMap.put("community","Community");
+topCategoryMap = Map();
+topCategoryMap.put("experience listing","Experience");
+topCategoryMap.put("experience verificado","Experience");
+topCategoryMap.put("experience impulso","Experience");
+topCategoryMap.put("stay listing","Stay");
+topCategoryMap.put("stay verificado","Stay");
+topCategoryMap.put("stay impulso","Stay");
+topCategoryMap.put("live listing","Live");
+topCategoryMap.put("live verificado","Live");
+topCategoryMap.put("live impulso","Live");
+topCategoryMap.put("visit listing","Visit");
+topCategoryMap.put("visit verificado","Visit");
+topCategoryMap.put("visit impulso","Visit");
+topCategoryMap.put("relocate listing","Relocate");
+topCategoryMap.put("relocate verificado","Relocate");
+topCategoryMap.put("relocate impulso","Relocate");
+topCategoryMap.put("individual","Individual");
+topCategoryMap.put("community","Community");
+try 
+{
+	response = invokeurl
+	[
+		url :"https://www.igopanama.com/api/v2/user/get/" + bdUserId
+		type :GET
+		headers:{"X-Api-Key":apiKey}
+	];
+	if(response.get("status") != "success")
+	{
+		resultLog = resultLog + "BD API call failed for BD ID " + bdUserId + ": " + response + "\n";
+		info resultLog;
+		return resultLog;
+	}
+	userList = response.get("message");
+	if(userList != null && userList.size() > 0)
+	{
+		u = userList.get(0);
+		userActive = u.get("active");
+		transactionIsPaid = false;
+		transactionsList = u.get("transactions");
+		if(transactionsList != null && transactionsList != false)
+		{
+			try 
+			{
+				if(transactionsList.size() > 0)
+				{
+					latestInvoice = transactionsList.get(0).get("invoice_details");
+					if(latestInvoice != null)
+					{
+						txStatus = latestInvoice.get("status");
+						if(txStatus == "Paid")
+						{
+							transactionIsPaid = true;
+						}
+					}
+				}
+			}
+			catch (txError)
+			{
+				resultLog = resultLog + "WARNING: unexpected transactions format for BD ID " + bdUserId + ": " + txError + "\n";
+			}
+		}
+		bdCompanyName = u.get("company");
+		if(bdCompanyName != null && bdCompanyName.trim().equalsIgnoreCase("Individual"))
+		{
+			bdCompanyName = "";
+		}
+		bdEmail = u.get("email");
+		bdPhone = u.get("phone_number");
+		bdFirstName = u.get("first_name");
+		bdLastName = u.get("last_name");
+		if(bdLastName == null || bdLastName == "")
+		{
+			bdLastName = "Unknown";
+		}
+		// FIX: fall back to the API's own values for Website/City/Street
+		// if the webhook body didn't carry them (e.g. the signup webhook).
+		if(bdWebsite == "" && u.get("website") != null)
+		{
+			bdWebsite = u.get("website");
+		}
+		if(bdCity == "" && u.get("city") != null)
+		{
+			bdCity = u.get("city");
+		}
+		if(bdStreet == "" && u.get("address1") != null)
+		{
+			bdStreet = u.get("address1");
+		}
+		subSchema = u.get("subscription_schema");
+		rawPlan = "";
+		if(subSchema != null && subSchema.get("subscription_name") != null)
+		{
+			rawPlan = subSchema.get("subscription_name");
+		}
+		else
+		{
+			topLevelSubName = u.get("subscription_name");
+			if(topLevelSubName != null)
+			{
+				rawPlan = topLevelSubName;
+			}
+		}
+		planPrice = null;
+		revenueMap = u.get("revenue");
+		if(revenueMap != null && revenueMap.get("paid") != null)
+		{
+			planPrice = revenueMap.get("paid");
+		}
+		if(planPrice == null && subSchema != null)
+		{
+			memberType = u.get("member_type");
+			if(memberType == "yearly")
+			{
+				planPrice = subSchema.get("yearly_amount");
+			}
+			else
+			{
+				planPrice = subSchema.get("monthly_amount");
+			}
+		}
+		safeAmount = null;
+		if(planPrice != null)
+		{
+			rawPriceStr = planPrice.toString().trim();
+			cleanedPriceStr = rawPriceStr.replaceAll("[^0-9.]","");
+			if(cleanedPriceStr != null && cleanedPriceStr != "")
+			{
+				try 
+				{
+					safeAmount = cleanedPriceStr.toDecimal();
+				}
+				catch (amountError)
+				{
+					safeAmount = null;
+				}
+			}
+			if(safeAmount == null)
+			{
+				resultLog = resultLog + "WARNING: could not parse plan price '" + rawPriceStr + "' for BD ID " + bdUserId + ", Amount left unset\n";
+			}
+		}
+		mappedPlan = "";
+		topCategoryValue = "";
+		if(rawPlan != null)
+		{
+			mappedPlan = planMap.get(rawPlan.toLowerCase());
+			topCategoryValue = topCategoryMap.get(rawPlan.toLowerCase());
+		}
+		if(mappedPlan == null || mappedPlan == "")
+		{
+			if(rawPlan != null && rawPlan != "")
+			{
+				resultLog = resultLog + "WARNING: unmapped plan value '" + rawPlan + "' for BD ID " + bdUserId + "\n";
+			}
+			mappedPlan = rawPlan;
+		}
+		if(topCategoryValue == null)
+		{
+			topCategoryValue = "";
+		}
+		dealNameBase = bdLastName;
+		if(bdCompanyName != null && bdCompanyName != "")
+		{
+			dealNameBase = bdCompanyName;
+		}
+		dealPlanLabel = "Membership";
+		if(mappedPlan != null && mappedPlan != "")
+		{
+			dealPlanLabel = mappedPlan;
+		}
+		dealNameValue = dealNameBase + " - " + dealPlanLabel;
+		isFreeListingPlan = false;
+		if(subSchema != null && subSchema.get("profile_type") == "free")
+		{
+			isFreeListingPlan = true;
+		}
+		else if(rawPlan != null && rawPlan.toLowerCase().contains("listing"))
+		{
+			isFreeListingPlan = true;
+		}
+		if(topCategoryValue == "Individual" || topCategoryValue == "Community")
+		{
+			try 
+			{
+				accountId = "";
+				if(topCategoryValue == "Community")
+				{
+					acctNameToUse = bdCompanyName;
+					if(acctNameToUse == null || acctNameToUse == "")
+					{
+						if(bdFirstName != null && bdFirstName != "")
+						{
+							acctNameToUse = bdFirstName + " " + bdLastName;
+						}
+						else
+						{
+							acctNameToUse = bdLastName;
+						}
+						acctNameToUse = acctNameToUse.trim();
+					}
+					try 
+					{
+						acctSearch = zoho.crm.searchRecords("Accounts","(BD_Member_ID:equals:" + bdUserId + ")");
+						if((acctSearch == null || acctSearch.size() == 0) && acctNameToUse != null && acctNameToUse != "")
+						{
+							acctSearch = zoho.crm.searchRecords("Accounts","(Account_Name:equals:" + acctNameToUse + ")");
+						}
+						if(acctSearch != null && acctSearch.size() > 0)
+						{
+							accountId = acctSearch.get(0).get("id");
+							acctUpdate = Map();
+							acctUpdate.put("Phone",bdPhone);
+							acctUpdate.put("Email",bdEmail);
+							acctUpdate.put("Current_Plan",mappedPlan);
+							acctUpdate.put("Top_Category",topCategoryValue);
+							acctUpdate.put("BD_Member_ID",bdUserId);
+							if(bdWebsite != null && bdWebsite != "")
+							{
+								acctUpdate.put("Website",bdWebsite);
+							}
+							if(bdCity != null && bdCity != "")
+							{
+								acctUpdate.put("Billing_City",bdCity);
+							}
+							if(bdStreet != null && bdStreet != "")
+							{
+								acctUpdate.put("Billing_Street",bdStreet);
+							}
+							zoho.crm.updateRecord("Accounts",accountId,acctUpdate);
+							resultLog = resultLog + "Existing Account matched/updated for Community BD ID " + bdUserId + " (" + acctNameToUse + ")\n";
+						}
+						else
+						{
+							acctCreate = Map();
+							acctCreate.put("Account_Name",acctNameToUse);
+							acctCreate.put("Phone",bdPhone);
+							acctCreate.put("Email",bdEmail);
+							acctCreate.put("Current_Plan",mappedPlan);
+							acctCreate.put("Top_Category",topCategoryValue);
+							acctCreate.put("BD_Member_ID",bdUserId);
+							if(bdWebsite != null && bdWebsite != "")
+							{
+								acctCreate.put("Website",bdWebsite);
+							}
+							if(bdCity != null && bdCity != "")
+							{
+								acctCreate.put("Billing_City",bdCity);
+							}
+							if(bdStreet != null && bdStreet != "")
+							{
+								acctCreate.put("Billing_Street",bdStreet);
+							}
+							acctResp = zoho.crm.createRecord("Accounts",acctCreate);
+							accountId = acctResp.get("id");
+							resultLog = resultLog + "New Account created for Community BD ID " + bdUserId + " (" + acctNameToUse + ")\n";
+						}
+					}
+					catch (acctError)
+					{
+						resultLog = resultLog + "WARNING: Account create/search failed for Community BD ID " + bdUserId + ": " + acctError + "\n";
+					}
+				}
+				leadId = "";
+				leadSearchCriteria = "(BD_Member_ID:equals:" + bdUserId + ")";
+				leadMatches = zoho.crm.searchRecords("Leads",leadSearchCriteria);
+				if((leadMatches == null || leadMatches.size() == 0) && bdEmail != null && bdEmail != "")
+				{
+					leadMatches = zoho.crm.searchRecords("Leads","(Email:equals:" + bdEmail + ")");
+				}
+				if((leadMatches == null || leadMatches.size() == 0) && bdPhone != null && bdPhone != "")
+				{
+					leadMatches = zoho.crm.searchRecords("Leads","(Phone:equals:" + bdPhone + ")");
+				}
+				if((leadMatches == null || leadMatches.size() == 0) && bdCompanyName != null && bdCompanyName != "")
+				{
+					leadMatches = zoho.crm.searchRecords("Leads","(Company:equals:" + bdCompanyName + ")");
+				}
+				if(leadMatches != null && leadMatches.size() > 0)
+				{
+					leadId = leadMatches.get(0).get("id");
+				}
+				contactId = "";
+				if(leadId != null && leadId != "")
+				{
+					try 
+					{
+						leadTagUpdate = Map();
+						leadTagUpdate.put("BD_Member_ID",bdUserId);
+						if(bdFirstName != null)
+						{
+							leadTagUpdate.put("First_Name",bdFirstName);
+						}
+						if(bdLastName != null && bdLastName != "")
+						{
+							leadTagUpdate.put("Last_Name",bdLastName);
+						}
+						if(bdEmail != null)
+						{
+							leadTagUpdate.put("Email",bdEmail);
+						}
+						if(bdPhone != null)
+						{
+							leadTagUpdate.put("Phone",bdPhone);
+						}
+						zoho.crm.updateRecord("Leads",leadId,leadTagUpdate);
+						convertValues = Map();
+						if(accountId != null && accountId != "")
+						{
+							convertValues.put("Accounts",accountId);
+						}
+						convertValues.put("overwrite",true);
+						convertResp = zoho.crm.convertLead(leadId,convertValues);
+						resultLog = resultLog + topCategoryValue + " Lead converted to Contact for BD ID " + bdUserId + " - response: " + convertResp + "\n";
+						if(convertResp != null && convertResp.get("Contacts") != null)
+						{
+							contactId = convertResp.get("Contacts");
+						}
+						if(convertResp != null && topCategoryValue == "Community" && (accountId == null || accountId == "") && convertResp.get("Accounts") != null)
+						{
+							accountId = convertResp.get("Accounts");
+						}
+					}
+					catch (convertError)
+					{
+						resultLog = resultLog + "Error converting Lead for " + topCategoryValue + " BD ID " + bdUserId + ": " + convertError + "\n";
+					}
+				}
+				else
+				{
+					if(bdEmail != null && bdEmail != "")
+					{
+						contactSearch = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
+						if(contactSearch != null && contactSearch.size() > 0)
+						{
+							contactId = contactSearch.get(0).get("id");
+						}
+					}
+					if((contactId == null || contactId == "") && bdPhone != null && bdPhone != "")
+					{
+						contactSearchByPhone = zoho.crm.searchRecords("Contacts","(Phone:equals:" + bdPhone + ")");
+						if(contactSearchByPhone != null && contactSearchByPhone.size() > 0)
+						{
+							contactId = contactSearchByPhone.get(0).get("id");
+						}
+					}
+				}
+				contactMap = Map();
+				contactMap.put("BD_Member_ID",bdUserId);
+				if(bdFirstName != null)
+				{
+					contactMap.put("First_Name",bdFirstName);
+				}
+				if(bdLastName != null && bdLastName != "")
+				{
+					contactMap.put("Last_Name",bdLastName);
+				}
+				if(bdEmail != null)
+				{
+					contactMap.put("Email",bdEmail);
+				}
+				if(bdPhone != null)
+				{
+					contactMap.put("Phone",bdPhone);
+				}
+				if(mappedPlan != null && mappedPlan != "")
+				{
+					contactMap.put("Current_Plan",mappedPlan);
+				}
+				if(topCategoryValue != null && topCategoryValue != "")
+				{
+					contactMap.put("Top_Category",topCategoryValue);
+				}
+				if(accountId != null && accountId != "")
+				{
+					contactMap.put("Account_Name",accountId);
+				}
+				if(bdCity != null && bdCity != "")
+				{
+					contactMap.put("Mailing_City",bdCity);
+				}
+				if(bdStreet != null && bdStreet != "")
+				{
+					contactMap.put("Mailing_Street",bdStreet);
+				}
+				if(contactId != null && contactId != "")
+				{
+					zoho.crm.updateRecord("Contacts",contactId,contactMap);
+					resultLog = resultLog + "Contact fields synced for " + topCategoryValue + " BD ID " + bdUserId + "\n";
+				}
+				else
+				{
+					contactResp = zoho.crm.createRecord("Contacts",contactMap);
+					contactId = contactResp.get("id");
+					resultLog = resultLog + "New Contact created for " + topCategoryValue + " BD ID " + bdUserId + " (no matching Lead or Contact found)\n";
+				}
+			}
+			catch (individualCommunityError)
+			{
+				resultLog = resultLog + "Error processing " + topCategoryValue + " BD ID " + bdUserId + ": " + individualCommunityError + "\n";
+			}
+		}
+		else if((userActive == 2 || userActive == "2") && transactionIsPaid == true && isFreeListingPlan == false)
+		{
+			try 
+			{
+				accountId = "";
+				acctNameToUse = bdCompanyName;
+				if(acctNameToUse == null || acctNameToUse == "")
+				{
+					if(bdFirstName != null && bdFirstName != "")
+					{
+						acctNameToUse = bdFirstName + " " + bdLastName;
+					}
+					else
+					{
+						acctNameToUse = bdLastName;
+					}
+					acctNameToUse = acctNameToUse.trim();
+				}
+				try 
+				{
+					acctSearch = zoho.crm.searchRecords("Accounts","(Account_Name:equals:" + acctNameToUse + ")");
+					if(acctSearch != null && acctSearch.size() > 0)
+					{
+						accountId = acctSearch.get(0).get("id");
+						acctUpdate = Map();
+						acctUpdate.put("Phone",bdPhone);
+						acctUpdate.put("Email",bdEmail);
+						acctUpdate.put("Current_Plan",mappedPlan);
+						acctUpdate.put("Top_Category",topCategoryValue);
+						acctUpdate.put("BD_Member_ID",bdUserId);
+						if(bdWebsite != null && bdWebsite != "")
+						{
+							acctUpdate.put("Website",bdWebsite);
+						}
+						if(bdCity != null && bdCity != "")
+						{
+							acctUpdate.put("Billing_City",bdCity);
+						}
+						if(bdStreet != null && bdStreet != "")
+						{
+							acctUpdate.put("Billing_Street",bdStreet);
+						}
+						zoho.crm.updateRecord("Accounts",accountId,acctUpdate);
+						resultLog = resultLog + "Existing Account matched/updated for BD ID " + bdUserId + " (" + acctNameToUse + ")\n";
+					}
+					else
+					{
+						acctCreate = Map();
+						acctCreate.put("Account_Name",acctNameToUse);
+						acctCreate.put("Phone",bdPhone);
+						acctCreate.put("Email",bdEmail);
+						acctCreate.put("Current_Plan",mappedPlan);
+						acctCreate.put("Top_Category",topCategoryValue);
+						acctCreate.put("BD_Member_ID",bdUserId);
+						if(bdWebsite != null && bdWebsite != "")
+						{
+							acctCreate.put("Website",bdWebsite);
+						}
+						if(bdCity != null && bdCity != "")
+						{
+							acctCreate.put("Billing_City",bdCity);
+						}
+						if(bdStreet != null && bdStreet != "")
+						{
+							acctCreate.put("Billing_Street",bdStreet);
+						}
+						acctResp = zoho.crm.createRecord("Accounts",acctCreate);
+						accountId = acctResp.get("id");
+						resultLog = resultLog + "New Account created for BD ID " + bdUserId + " (" + acctNameToUse + ")\n";
+					}
+				}
+				catch (acctError)
+				{
+					resultLog = resultLog + "WARNING: Account create/search failed for BD ID " + bdUserId + ": " + acctError + "\n";
+				}
+				dealSearchCriteria = "(BD_Member_ID:equals:" + bdUserId + ")";
+				dealMatches = zoho.crm.searchRecords("Deals",dealSearchCriteria);
+				if(dealMatches != null && dealMatches.size() > 0)
+				{
+					dealId = dealMatches.get(0).get("id");
+					currentStage = dealMatches.get(0).get("Stage");
+					dealFull = zoho.crm.getRecordById("Deals",dealId);
+					dealContactId = null;
+					if(dealFull != null)
+					{
+						dealContactId = dealFull.get("Contact_Name");
+					}
+					if(dealContactId != null)
+					{
+						if(dealContactId.get("id") != null)
+						{
+							dealContactId = dealContactId.get("id");
+						}
+					}
+					updateMap = Map();
+					if(currentStage != "Closed Won")
+					{
+						updateMap.put("Stage","Closed Won");
+					}
+					if(accountId != "")
+					{
+						updateMap.put("Account_Name",accountId);
+					}
+					if(safeAmount != null)
+					{
+						updateMap.put("Amount",safeAmount);
+					}
+					if(mappedPlan != null && mappedPlan != "")
+					{
+						updateMap.put("Current_Plan",mappedPlan);
+					}
+					if(topCategoryValue != null && topCategoryValue != "")
+					{
+						updateMap.put("Top_Category",topCategoryValue);
+					}
+					if(dealNameValue != null && dealNameValue != "")
+					{
+						updateMap.put("Deal_Name",dealNameValue);
+					}
+					if(subscriptionStartDate != null)
+					{
+						updateMap.put("Subscription_Start_Date",subscriptionStartDate);
+					}
+					if(paymentOptionValue != null && paymentOptionValue != "")
+					{
+						updateMap.put("Payment_Option",paymentOptionValue);
+					}
+					if(updateMap.size() > 0)
+					{
+						zoho.crm.updateRecord("Deals",dealId,updateMap);
+						resultLog = resultLog + "Deal updated for BD ID " + bdUserId + "\n";
+					}
+					if(dealContactId != null && dealContactId != "")
+					{
+						contactUpdate = Map();
+						contactUpdate.put("BD_Member_ID",bdUserId);
+						if(bdFirstName != null)
+						{
+							contactUpdate.put("First_Name",bdFirstName);
+						}
+						if(bdLastName != null && bdLastName != "")
+						{
+							contactUpdate.put("Last_Name",bdLastName);
+						}
+						if(bdEmail != null)
+						{
+							contactUpdate.put("Email",bdEmail);
+						}
+						if(bdPhone != null)
+						{
+							contactUpdate.put("Phone",bdPhone);
+						}
+						if(mappedPlan != null && mappedPlan != "")
+						{
+							contactUpdate.put("Current_Plan",mappedPlan);
+						}
+						if(topCategoryValue != null && topCategoryValue != "")
+						{
+							contactUpdate.put("Top_Category",topCategoryValue);
+						}
+						if(accountId != null && accountId != "")
+						{
+							contactUpdate.put("Account_Name",accountId);
+						}
+						if(bdCity != null && bdCity != "")
+						{
+							contactUpdate.put("Mailing_City",bdCity);
+						}
+						if(bdStreet != null && bdStreet != "")
+						{
+							contactUpdate.put("Mailing_Street",bdStreet);
+						}
+						if(contactUpdate.size() > 0)
+						{
+							zoho.crm.updateRecord("Contacts",dealContactId,contactUpdate);
+							resultLog = resultLog + "Contact updated for BD ID " + bdUserId + "\n";
+						}
+					}
+					else
+					{
+						resultLog = resultLog + "WARNING: no Contact_Name found on Deal for BD ID " + bdUserId + ", contact not synced\n";
+					}
+				}
+				else
+				{
+					leadSearchCriteria = "(BD_Member_ID:equals:" + bdUserId + ")";
+					leadMatches = zoho.crm.searchRecords("Leads",leadSearchCriteria);
+					if((leadMatches == null || leadMatches.size() == 0) && bdEmail != null && bdEmail != "")
+					{
+						leadMatches = zoho.crm.searchRecords("Leads","(Email:equals:" + bdEmail + ")");
+					}
+					if((leadMatches == null || leadMatches.size() == 0) && bdPhone != null && bdPhone != "")
+					{
+						leadMatches = zoho.crm.searchRecords("Leads","(Phone:equals:" + bdPhone + ")");
+					}
+					if((leadMatches == null || leadMatches.size() == 0) && bdCompanyName != null && bdCompanyName != "")
+					{
+						leadMatches = zoho.crm.searchRecords("Leads","(Company:equals:" + bdCompanyName + ")");
+					}
+					if(leadMatches != null && leadMatches.size() > 0)
+					{
+						leadRecord = leadMatches.get(0);
+						leadId = leadRecord.get("id");
+						leadTagUpdate = Map();
+						leadTagUpdate.put("BD_Member_ID",bdUserId);
+						leadTagUpdate.put("Lead_Source","IGP");
+						zoho.crm.updateRecord("Leads",leadId,leadTagUpdate);
+						dealDetails = Map();
+						dealDetails.put("Deal_Name",dealNameValue);
+						dealDetails.put("Stage","Closed Won");
+						dealDetails.put("Closing_Date",zoho.currentdate);
+						dealDetails.put("BD_Member_ID",bdUserId);
+						if(safeAmount != null)
+						{
+							dealDetails.put("Amount",safeAmount);
+						}
+						if(mappedPlan != null && mappedPlan != "")
+						{
+							dealDetails.put("Current_Plan",mappedPlan);
+						}
+						if(topCategoryValue != null && topCategoryValue != "")
+						{
+							dealDetails.put("Top_Category",topCategoryValue);
+						}
+						if(accountId != null && accountId != "")
+						{
+							dealDetails.put("Account_Name",accountId);
+						}
+						if(subscriptionStartDate != null)
+						{
+							dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+						}
+						if(paymentOptionValue != null && paymentOptionValue != "")
+						{
+							dealDetails.put("Payment_Option",paymentOptionValue);
+						}
+						existingContactId = "";
+						if(bdEmail != null && bdEmail != "")
+						{
+							existingContactSearch = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
+							if(existingContactSearch != null && existingContactSearch.size() > 0)
+							{
+								existingContactId = existingContactSearch.get(0).get("id");
+							}
+						}
+						convertValues = Map();
+						convertValues.put("Deals",dealDetails);
+						if(existingContactId != null && existingContactId != "")
+						{
+							convertValues.put("Contacts",existingContactId);
+						}
+						if(accountId != null && accountId != "")
+						{
+							convertValues.put("Accounts",accountId);
+						}
+						convertValues.put("overwrite",true);
+						convertResp = zoho.crm.convertLead(leadId,convertValues);
+						resultLog = resultLog + "Lead conversion attempted for BD ID " + bdUserId + " - response: " + convertResp + "\n";
+						try 
+						{
+							if(convertResp != null && convertResp.get("Deals") != null)
+							{
+								newDealIdFromConversion = convertResp.get("Deals");
+								dealFixMap = Map();
+								dealFixMap.put("BD_Member_ID",bdUserId);
+								if(mappedPlan != null && mappedPlan != "")
+								{
+									dealFixMap.put("Current_Plan",mappedPlan);
+								}
+								if(topCategoryValue != null && topCategoryValue != "")
+								{
+									dealFixMap.put("Top_Category",topCategoryValue);
+								}
+								if(subscriptionStartDate != null)
+								{
+									dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+								}
+								if(paymentOptionValue != null && paymentOptionValue != "")
+								{
+									dealFixMap.put("Payment_Option",paymentOptionValue);
+								}
+								zoho.crm.updateRecord("Deals",newDealIdFromConversion,dealFixMap);
+								resultLog = resultLog + "Deal Current_Plan/Top_Category/BD_Member_ID/Subscription_Start_Date/Payment_Option force-synced after conversion for BD ID " + bdUserId + "\n";
+							}
+						}
+						catch (dealFixError)
+						{
+							resultLog = resultLog + "WARNING: could not force-sync Deal fields after conversion for BD ID " + bdUserId + ": " + dealFixError + "\n";
+						}
+						resultContactId = "";
+						if(existingContactId != null && existingContactId != "")
+						{
+							resultContactId = existingContactId;
+						}
+						else if(convertResp != null)
+						{
+							try 
+							{
+								convertedContactRef = convertResp.get("Contacts");
+								if(convertedContactRef != null)
+								{
+									resultContactId = convertedContactRef;
+								}
+							}
+							catch (parseContactError)
+							{
+								resultLog = resultLog + "WARNING: could not read new Contact id from conversion response for BD ID " + bdUserId + "\n";
+							}
+						}
+						if(resultContactId != null && resultContactId != "")
+						{
+							try 
+							{
+								postConvertContactUpdate = Map();
+								postConvertContactUpdate.put("BD_Member_ID",bdUserId);
+								if(mappedPlan != null && mappedPlan != "")
+								{
+									postConvertContactUpdate.put("Current_Plan",mappedPlan);
+								}
+								if(topCategoryValue != null && topCategoryValue != "")
+								{
+									postConvertContactUpdate.put("Top_Category",topCategoryValue);
+								}
+								if(accountId != null && accountId != "")
+								{
+									postConvertContactUpdate.put("Account_Name",accountId);
+								}
+								if(bdCity != null && bdCity != "")
+								{
+									postConvertContactUpdate.put("Mailing_City",bdCity);
+								}
+								if(bdStreet != null && bdStreet != "")
+								{
+									postConvertContactUpdate.put("Mailing_Street",bdStreet);
+								}
+								zoho.crm.updateRecord("Contacts",resultContactId,postConvertContactUpdate);
+								resultLog = resultLog + "Contact BD_Member_ID/Current_Plan/Account linked after conversion for BD ID " + bdUserId + "\n";
+							}
+							catch (postConvertError)
+							{
+								resultLog = resultLog + "WARNING: could not update converted Contact for BD ID " + bdUserId + ": " + postConvertError + "\n";
+							}
+						}
+					}
+					else
+					{
+						newContactId = "";
+						if(bdEmail != null && bdEmail != "")
+						{
+							contactSearchByEmail = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
+							if(contactSearchByEmail != null && contactSearchByEmail.size() > 0)
+							{
+								newContactId = contactSearchByEmail.get(0).get("id");
+								contactRefresh = Map();
+								contactRefresh.put("BD_Member_ID",bdUserId);
+								if(bdFirstName != null)
+								{
+									contactRefresh.put("First_Name",bdFirstName);
+								}
+								if(bdLastName != null && bdLastName != "")
+								{
+									contactRefresh.put("Last_Name",bdLastName);
+								}
+								if(bdPhone != null)
+								{
+									contactRefresh.put("Phone",bdPhone);
+								}
+								if(mappedPlan != null && mappedPlan != "")
+								{
+									contactRefresh.put("Current_Plan",mappedPlan);
+								}
+								if(topCategoryValue != null && topCategoryValue != "")
+								{
+									contactRefresh.put("Top_Category",topCategoryValue);
+								}
+								if(accountId != "")
+								{
+									contactRefresh.put("Account_Name",accountId);
+								}
+								if(bdCity != null && bdCity != "")
+								{
+									contactRefresh.put("Mailing_City",bdCity);
+								}
+								if(bdStreet != null && bdStreet != "")
+								{
+									contactRefresh.put("Mailing_Street",bdStreet);
+								}
+								if(contactRefresh.size() > 0)
+								{
+									zoho.crm.updateRecord("Contacts",newContactId,contactRefresh);
+								}
+								resultLog = resultLog + "Existing Contact reused for BD ID " + bdUserId + "\n";
+							}
+						}
+						if(newContactId == null || newContactId == "")
+						{
+							contactMap = Map();
+							contactMap.put("BD_Member_ID",bdUserId);
+							contactMap.put("First_Name",bdFirstName);
+							contactMap.put("Last_Name",bdLastName);
+							contactMap.put("Email",bdEmail);
+							contactMap.put("Phone",bdPhone);
+							if(mappedPlan != null && mappedPlan != "")
+							{
+								contactMap.put("Current_Plan",mappedPlan);
+							}
+							if(topCategoryValue != null && topCategoryValue != "")
+							{
+								contactMap.put("Top_Category",topCategoryValue);
+							}
+							if(accountId != "")
+							{
+								contactMap.put("Account_Name",accountId);
+							}
+							if(bdCity != null && bdCity != "")
+							{
+								contactMap.put("Mailing_City",bdCity);
+							}
+							if(bdStreet != null && bdStreet != "")
+							{
+								contactMap.put("Mailing_Street",bdStreet);
+							}
+							contactResp = zoho.crm.createRecord("Contacts",contactMap);
+							newContactId = contactResp.get("id");
+						}
+						dealMap = Map();
+						dealMap.put("Deal_Name",dealNameValue);
+						dealMap.put("Stage","Closed Won");
+						dealMap.put("Closing_Date",zoho.currentdate);
+						dealMap.put("Contact_Name",newContactId);
+						dealMap.put("BD_Member_ID",bdUserId);
+						if(accountId != "")
+						{
+							dealMap.put("Account_Name",accountId);
+						}
+						if(safeAmount != null)
+						{
+							dealMap.put("Amount",safeAmount);
+						}
+						if(mappedPlan != null && mappedPlan != "")
+						{
+							dealMap.put("Current_Plan",mappedPlan);
+						}
+						if(topCategoryValue != null && topCategoryValue != "")
+						{
+							dealMap.put("Top_Category",topCategoryValue);
+						}
+						if(subscriptionStartDate != null)
+						{
+							dealMap.put("Subscription_Start_Date",subscriptionStartDate);
+						}
+						if(paymentOptionValue != null && paymentOptionValue != "")
+						{
+							dealMap.put("Payment_Option",paymentOptionValue);
+						}
+						newDealResp = zoho.crm.createRecord("Deals",dealMap);
+						resultLog = resultLog + "New Deal created directly for unsynced BD ID " + bdUserId + "\n";
+					}
+				}
+			}
+			catch (recordError)
+			{
+				resultLog = resultLog + "Error processing BD ID " + bdUserId + ": " + recordError + "\n";
+			}
+			try 
+			{
+				cleanupMatches = zoho.crm.searchRecords("Leads","(BD_Member_ID:equals:" + bdUserId + ")");
+				if((cleanupMatches == null || cleanupMatches.size() == 0) && bdEmail != null && bdEmail != "")
+				{
+					cleanupMatches = zoho.crm.searchRecords("Leads","(Email:equals:" + bdEmail + ")");
+				}
+				if((cleanupMatches == null || cleanupMatches.size() == 0) && bdPhone != null && bdPhone != "")
+				{
+					cleanupMatches = zoho.crm.searchRecords("Leads","(Phone:equals:" + bdPhone + ")");
+				}
+				if((cleanupMatches == null || cleanupMatches.size() == 0) && bdCompanyName != null && bdCompanyName != "")
+				{
+					cleanupMatches = zoho.crm.searchRecords("Leads","(Company:equals:" + bdCompanyName + ")");
+				}
+				if(cleanupMatches != null && cleanupMatches.size() > 0)
+				{
+					for each  staleLead in cleanupMatches
+					{
+						deleteMap = Map();
+						deleteMap.put("module","Leads");
+						deleteMap.put("id",staleLead.get("id"));
+						zoho.crm.invokeConnector("crm.delete",deleteMap);
+						resultLog = resultLog + "Removed stale Lead " + staleLead.get("id") + " for paid BD ID " + bdUserId + "\n";
+					}
+				}
+			}
+			catch (cleanupError)
+			{
+				resultLog = resultLog + "WARNING: Lead cleanup failed for BD ID " + bdUserId + ": " + cleanupError + "\n";
+			}
+		}
+		else if((userActive == 2 || userActive == "2") && isFreeListingPlan == true)
+		{
+			try 
+			{
+				leadSearchCriteria = "(BD_Member_ID:equals:" + bdUserId + ")";
+				leadMatches = zoho.crm.searchRecords("Leads",leadSearchCriteria);
+				if((leadMatches == null || leadMatches.size() == 0) && bdEmail != null && bdEmail != "")
+				{
+					leadMatches = zoho.crm.searchRecords("Leads","(Email:equals:" + bdEmail + ")");
+				}
+				if((leadMatches == null || leadMatches.size() == 0) && bdPhone != null && bdPhone != "")
+				{
+					leadMatches = zoho.crm.searchRecords("Leads","(Phone:equals:" + bdPhone + ")");
+				}
+				if((leadMatches == null || leadMatches.size() == 0) && bdCompanyName != null && bdCompanyName != "")
+				{
+					leadMatches = zoho.crm.searchRecords("Leads","(Company:equals:" + bdCompanyName + ")");
+				}
+				if(leadMatches != null && leadMatches.size() > 0)
+				{
+					leadId = leadMatches.get(0).get("id");
+					leadUpdate = Map();
+					leadUpdate.put("BD_Member_ID",bdUserId);
+					leadUpdate.put("Lead_Source","IGP");
+					if(bdFirstName != null)
+					{
+						leadUpdate.put("First_Name",bdFirstName);
+					}
+					if(bdLastName != null && bdLastName != "")
+					{
+						leadUpdate.put("Last_Name",bdLastName);
+					}
+					if(bdEmail != null)
+					{
+						leadUpdate.put("Email",bdEmail);
+					}
+					if(bdPhone != null)
+					{
+						leadUpdate.put("Phone",bdPhone);
+					}
+					if(bdCompanyName != null && bdCompanyName != "")
+					{
+						leadUpdate.put("Company",bdCompanyName);
+					}
+					if(mappedPlan != null && mappedPlan != "")
+					{
+						leadUpdate.put("Current_Plan",mappedPlan);
+					}
+					if(topCategoryValue != null && topCategoryValue != "")
+					{
+						leadUpdate.put("Top_Category",topCategoryValue);
+					}
+					// FIX: Website/City/Street were never mapped in this
+					// branch, which is why they didn't sync for the
+					// "ZZZ Visit Listing" test (Visit Listing is a
+					// free-listing plan, so it always lands here).
+					if(bdWebsite != null && bdWebsite != "")
+					{
+						leadUpdate.put("Website",bdWebsite);
+					}
+					if(bdCity != null && bdCity != "")
+					{
+						leadUpdate.put("City",bdCity);
+					}
+					if(bdStreet != null && bdStreet != "")
+					{
+						leadUpdate.put("Street",bdStreet);
+					}
+					zoho.crm.updateRecord("Leads",leadId,leadUpdate);
+					resultLog = resultLog + "Existing Lead updated for free listing BD ID " + bdUserId + "\n";
+				}
+				else
+				{
+					leadCreate = Map();
+					leadCreate.put("BD_Member_ID",bdUserId);
+					leadCreate.put("Lead_Status","New Inquiry");
+					leadCreate.put("Lead_Source","IGP");
+					if(bdFirstName != null)
+					{
+						leadCreate.put("First_Name",bdFirstName);
+					}
+					leadCreate.put("Last_Name",bdLastName);
+					if(bdEmail != null)
+					{
+						leadCreate.put("Email",bdEmail);
+					}
+					if(bdPhone != null)
+					{
+						leadCreate.put("Phone",bdPhone);
+					}
+					if(bdCompanyName != null && bdCompanyName != "")
+					{
+						leadCreate.put("Company",bdCompanyName);
+					}
+					if(mappedPlan != null && mappedPlan != "")
+					{
+						leadCreate.put("Current_Plan",mappedPlan);
+					}
+					if(topCategoryValue != null && topCategoryValue != "")
+					{
+						leadCreate.put("Top_Category",topCategoryValue);
+					}
+					if(bdWebsite != null && bdWebsite != "")
+					{
+						leadCreate.put("Website",bdWebsite);
+					}
+					if(bdCity != null && bdCity != "")
+					{
+						leadCreate.put("City",bdCity);
+					}
+					if(bdStreet != null && bdStreet != "")
+					{
+						leadCreate.put("Street",bdStreet);
+					}
+					newLeadResp = zoho.crm.createRecord("Leads",leadCreate);
+					resultLog = resultLog + "New Lead created as New Inquiry for free listing BD ID " + bdUserId + "\n";
+				}
+			}
+			catch (leadError)
+			{
+				resultLog = resultLog + "Error creating/updating Lead for free listing BD ID " + bdUserId + ": " + leadError + "\n";
+			}
+		}
+		else
+		{
+			resultLog = resultLog + "BD ID " + bdUserId + " skipped - active: " + userActive + ", latest transaction paid: " + transactionIsPaid + ", free listing: " + isFreeListingPlan + "\n";
+		}
+		// ==================== VERIFIED_LEAD_INSTANT_CONVERT PATCH ====================
+		// Merges schedule.Convert_Verified_Leads into this webhook so a Lead is
+		// pushed into the pipeline the moment BD reports the member as verified,
+		// instead of waiting for the periodic schedule to pick it up. Safe to run
+		// after the branches above: any Lead already converted by them won't turn
+		// up in this search, so there's no double-conversion.
+		if(mappedVerifiedMember == "YES - Verified")
+		{
+			try 
+			{
+				vlSearchCriteria = "(BD_Member_ID:equals:" + bdUserId + ")";
+				vlMatches = zoho.crm.searchRecords("Leads",vlSearchCriteria);
+				if((vlMatches == null || vlMatches.size() == 0) && bdEmail != null && bdEmail != "")
+				{
+					vlMatches = zoho.crm.searchRecords("Leads","(Email:equals:" + bdEmail + ")");
+				}
+				if((vlMatches == null || vlMatches.size() == 0) && bdPhone != null && bdPhone != "")
+				{
+					vlMatches = zoho.crm.searchRecords("Leads","(Phone:equals:" + bdPhone + ")");
+				}
+				if((vlMatches == null || vlMatches.size() == 0) && bdCompanyName != null && bdCompanyName != "")
+				{
+					vlMatches = zoho.crm.searchRecords("Leads","(Company:equals:" + bdCompanyName + ")");
+				}
+				if(vlMatches != null && vlMatches.size() > 0)
+				{
+					vlLead = vlMatches.get(0);
+					vlLeadId = vlLead.get("id");
+					if(vlLead.get("$converted") != true)
+					{
+						vlFullName = (ifnull(vlLead.get("First_Name"),"") + " " + ifnull(vlLead.get("Last_Name"),"")).trim();
+						vlCompany = vlLead.get("Company");
+						if(vlCompany == null || vlCompany.trim() == "")
+						{
+							zoho.crm.updateRecord("Leads",vlLeadId,{"Company":vlFullName});
+							vlCompany = vlFullName;
+						}
+						vlDealMap = Map();
+						vlDealMap.put("Deal_Name",vlCompany + " - " + vlFullName);
+						vlDealMap.put("Closing_Date",zoho.currentdate.addDay(30).toString("yyyy-MM-dd"));
+						vlDealMap.put("Stage","Sales Outreach");
+						// must match your pipeline stage exactly
+						vlDealMap.put("BD_Member_ID",bdUserId);
+						// so later dealMatches lookups can find it
+						vlConvertMap = Map();
+						vlConvertMap.put("overwrite",true);
+						vlConvertMap.put("notify_lead_owner",false);
+						vlConvertMap.put("notify_new_entity_owner",false);
+						vlConvertMap.put("Deals",vlDealMap);
+						vlResponse = zoho.crm.convertLead(vlLeadId,vlConvertMap);
+						resultLog = resultLog + "Verified Lead " + vlLeadId + " converted instantly via webhook - response: " + vlResponse + "\n";
+					}
+				}
+			}
+			catch (vlError)
+			{
+				resultLog = resultLog + "WARNING: instant verified-lead conversion failed for BD ID " + bdUserId + ": " + vlError + "\n";
+			}
+		}
+		// ==================================================================================
+	}
+	else
+	{
+		resultLog = resultLog + "No user found for BD ID " + bdUserId + "\n";
+	}
+}
+catch (fetchError)
+{
+	resultLog = resultLog + "Error fetching BD ID " + bdUserId + ": " + fetchError + "\n";
+}
+info resultLog;
+return resultLog;
+}
