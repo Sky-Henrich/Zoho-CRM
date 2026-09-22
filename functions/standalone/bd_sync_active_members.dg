@@ -312,6 +312,15 @@ try
 	{
 		u = userList.get(0);
 		userActive = u.get("active");
+		// ---- CLAIMABLE_SIGNAL DIAGNOSTIC ----
+		// "Claimable" status should route a Deal to Sales Outreach rather
+		// than being silently skipped (userActive==2 currently gates the
+		// whole Closed Won/Sales Outreach branch), but the exact field/value
+		// BD uses for it isn't confirmed yet. Logs candidate fields on every
+		// run so a test against a known Claimable member reveals the real
+		// signal instead of guessing at one. Remove once confirmed and wired
+		// into the branch condition.
+		resultLog = resultLog + "DIAGNOSTIC: active='" + userActive + "' status='" + u.get("status") + "' claimable='" + u.get("claimable") + "' listing_status='" + u.get("listing_status") + "' for BD ID " + bdUserId + "\n";
 		transactionIsPaid = false;
 		transactionsList = u.get("transactions");
 		if(transactionsList != null && transactionsList != false)
@@ -612,6 +621,18 @@ try
 			isSalesOutreachListingPlan = true;
 		}
 		// ==================================================================================
+		// ==================== CLOSED_WON_CRITERIA PATCH (1 of 2) ====================
+		// Closed Won requires the Current_Plan to specifically be one of the
+		// ten Verificado/Impulso paid tiers - not just "not a free listing
+		// plan" (which would also admit Individual/Community, handled by an
+		// entirely separate branch anyway, but being explicit here matches
+		// exactly what was asked rather than relying on that indirectly).
+		isVerificadoOrImpulsoPlan = false;
+		if(mappedPlan == "Visit Verificado" || mappedPlan == "Visit Impulso" || mappedPlan == "Stay Verificado" || mappedPlan == "Stay Impulso" || mappedPlan == "Live Verificado" || mappedPlan == "Live Impulso" || mappedPlan == "Relocate Verificado" || mappedPlan == "Relocate Impulso" || mappedPlan == "Experience Verificado" || mappedPlan == "Experience Impulso")
+		{
+			isVerificadoOrImpulsoPlan = true;
+		}
+		// ==================================================================================
 		// ---------------------------------------------------------------
 		// Individual / Community members are not business prospects, so
 		// they never go into the Leads module long-term. Individual ->
@@ -882,15 +903,23 @@ try
 		// through this Account+Contact+Deal path rather than the Leads-only
 		// path below. A true paid, non-listing plan still qualifies exactly
 		// as before via the original transactionIsPaid/isFreeListingPlan
-		// condition. targetStage picks which Deal stage this run should
-		// produce/enforce: "Sales Outreach" for the five listing plans,
-		// "Closed Won" for genuine paid plans.
+		// condition.
 		else if((userActive == 2 || userActive == "2") && (isSalesOutreachListingPlan == true || transactionIsPaid == true && isFreeListingPlan == false))
 		{
-			targetStage = "Closed Won";
-			if(isSalesOutreachListingPlan == true)
+			// ==================== CLOSED_WON_CRITERIA PATCH (2 of 2) ====================
+			// Closed Won requires ALL three: a real amount paid (>0), the
+			// Current_Plan being one of the ten Verificado/Impulso tiers, and
+			// the Deal's Trial_Plan field being empty (checked further below,
+			// once an existing Deal's current Trial_Plan value is available -
+			// a brand-new Deal has no prior Trial_Plan so trivially satisfies
+			// this one). Sales Outreach is the default/fallback whenever any
+			// of these don't hold, same as it already is for the five free
+			// listing plans - it's the general "still in the funnel, not yet
+			// won" stage now, not just the free-listing-specific one.
+			targetStage = "Sales Outreach";
+			if(isSalesOutreachListingPlan == false && safeAmount != null && safeAmount > 0 && isVerificadoOrImpulsoPlan == true)
 			{
-				targetStage = "Sales Outreach";
+				targetStage = "Closed Won";
 			}
 			// ==================================================================================
 			try
@@ -1003,6 +1032,22 @@ try
 					{
 						dealContactId = dealFull.get("Contact_Name");
 					}
+					// ---- CLOSED_WON_CRITERIA PATCH: Trial_Plan check ----
+					// Third Closed Won condition - the Deal's CURRENT Trial_Plan
+					// must be empty. Only meaningful for an existing Deal (a new
+					// one has no prior Trial_Plan value to check), so this
+					// downgrade only applies here, after the record's actual
+					// current value is available.
+					if(targetStage == "Closed Won" && dealFull != null)
+					{
+						dealCurrentTrialPlan = dealFull.get("Trial_Plan");
+						if(dealCurrentTrialPlan != null && dealCurrentTrialPlan != "")
+						{
+							targetStage = "Sales Outreach";
+							resultLog = resultLog + "Closed Won downgraded to Sales Outreach for BD ID " + bdUserId + " - Deal's Trial_Plan is not empty ('" + dealCurrentTrialPlan + "')\n";
+						}
+					}
+					// -----------------------------------------
 					if(dealContactId != null)
 					{
 						if(dealContactId.get("id") != null)
