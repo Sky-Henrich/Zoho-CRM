@@ -338,6 +338,73 @@ try
 		{
 			bdLastName = "Unknown";
 		}
+		// ==================== VERIFIED_MEMBER_LIVE_API PATCH ====================
+		// The webhook body's "user[verified]" field parsed empty on a real
+		// payload that clearly contained it, root cause not pinned down.
+		// This same live BD API call already fetches the member's full
+		// current record (company, email, phone, etc. all come from it
+		// above) - it almost certainly reports verification status too,
+		// and reading it directly here is simpler and more robust than
+		// depending on webhook body parsing, plus it naturally covers both
+		// the verified-true and verified-false cases without needing to
+		// infer false from a field's absence. Tries the most likely field
+		// names BD's API might use; logs which one (if any) was found so
+		// this is self-diagnosing on the next run either way.
+		bdVerifiedLive = u.get("verified");
+		bdVerifiedLiveKeyUsed = "verified";
+		if(bdVerifiedLive == null)
+		{
+			bdVerifiedLive = u.get("is_verified");
+			bdVerifiedLiveKeyUsed = "is_verified";
+		}
+		if(bdVerifiedLive == null)
+		{
+			bdVerifiedLive = u.get("verified_member");
+			bdVerifiedLiveKeyUsed = "verified_member";
+		}
+		if(bdVerifiedLive == null)
+		{
+			bdVerifiedLive = u.get("member_verified");
+			bdVerifiedLiveKeyUsed = "member_verified";
+		}
+		if(bdVerifiedLive == null)
+		{
+			bdVerifiedLive = u.get("verification_status");
+			bdVerifiedLiveKeyUsed = "verification_status";
+		}
+		if(bdVerifiedLive != null)
+		{
+			resultLog = resultLog + "DIAGNOSTIC: live API verified field found under key '" + bdVerifiedLiveKeyUsed + "' = '" + bdVerifiedLive + "' for BD ID " + bdUserId + "\n";
+			bdVerifiedRaw = bdVerifiedLive.toString();
+		}
+		else
+		{
+			resultLog = resultLog + "DIAGNOSTIC: no live API verified field found under any of verified/is_verified/verified_member/member_verified/verification_status for BD ID " + bdUserId + " - falling back to webhook value\n";
+		}
+		// Re-run the same YES/NO mapping used earlier for the webhook value,
+		// now against bdVerifiedRaw as it stands after the live-API check
+		// above. If the live API found nothing, bdVerifiedRaw (and
+		// mappedVerifiedMember, already computed earlier from the webhook
+		// alone, including the old_user[verified]-omitted-means-NO case)
+		// are left exactly as they were - this only has an effect when the
+		// live API provided a value.
+		if(bdVerifiedRaw != null && bdVerifiedRaw != "")
+		{
+			verifiedRawLowerLive = bdVerifiedRaw.toString().trim().toLowerCase();
+			if(verifiedRawLowerLive == "1" || verifiedRawLowerLive == "yes" || verifiedRawLowerLive == "true")
+			{
+				mappedVerifiedMember = "YES - Verified";
+			}
+			else if(verifiedRawLowerLive == "0" || verifiedRawLowerLive == "no" || verifiedRawLowerLive == "false")
+			{
+				mappedVerifiedMember = "NO - Not Verified";
+			}
+			else
+			{
+				resultLog = resultLog + "WARNING: unrecognized verified value '" + bdVerifiedRaw + "' for BD ID " + bdUserId + "\n";
+			}
+		}
+		// ==========================================================================
 		// ==================== BD_PROFILE_URL PATCH (1 of 10) ====================
 		// Build the public listing URL from BD's "filename" field. Confirmed
 		// live pattern: https://www.igopanama.com/{filename}
