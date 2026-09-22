@@ -602,6 +602,21 @@ try
 		{
 			isFreeListingPlan = true;
 		}
+		// ---- CLAIMABLE_LEAD_ONLY PATCH ----
+		// A Claimable listing has lapsed out of BD's monitoring process - it's
+		// not a live sales opportunity, so it should stay a Lead, not touch
+		// Deals at all, same as the free listing plans. Reusing
+		// isFreeListingPlan routes it through that exact same Lead-only path
+		// below, which already has the conversion logic this needs: the next
+		// time a member_update event shows a real paid plan, the paid-plan
+		// branch searches for this same Lead (by BD_Member_ID/Email/Phone/
+		// Company) and converts it to a Deal - no new conversion logic
+		// required, it already exists for this exact transition.
+		else if(rawPlan != null && rawPlan.toLowerCase() == "claimable")
+		{
+			isFreeListingPlan = true;
+		}
+		// -----------------------------------------
 		// ==================== SALES_OUTREACH_LISTING_PATCH (1 of 3) ====================
 		// The base "X Listing" plans (no Verificado/Impulso upgrade) are free
 		// signups, so isFreeListingPlan above marks them true and they'd
