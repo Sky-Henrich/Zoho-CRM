@@ -956,14 +956,123 @@ try
 					// ---- BLUEPRINT_STAGE_SPLIT PATCH (Stage updated separately) ----
 					// Kept out of updateMap above so a blueprint rejection here
 					// never blocks Current_Plan/Amount/Top_Category/etc from saving.
+					//
+					// ---- BLUEPRINT_TRANSITION PATCH ----
+					// A Blueprint-governed Stage can't be set with a plain field
+					// update once a Deal is mid-process - Zoho rejects it with
+					// RECORD_IN_BLUEPRINT ("Stage cannot be updated as it is in
+					// blueprint"). Per business decision: a successful BD payment
+					// should still move the Deal to Closed Won, bypassing any
+					// intermediate manual blueprint steps. The only way to do that
+					// via API is to execute one of the Blueprint's own next-step
+					// transitions: GET the transitions currently available for
+					// this record, find the one whose name matches the target
+					// stage, then PUT to execute it. This requires a
+					// pre-configured Connection named "bd_sync_blueprint_connection"
+					// (Setup > Developer Space > Connections, CRM scope) - see the
+					// deployment notes for setup steps. The plain update is tried
+					// first since most Deals aren't blueprint-locked and it's a
+					// single call; the blueprint path only runs when that specific
+					// rejection occurs.
 					if(stageChanged == true)
 					{
 						stageUpdateMap = Map();
 						stageUpdateMap.put("Stage",targetStage);
 						stageUpdateResp = zoho.crm.updateRecord("Deals",dealId,stageUpdateMap);
-						if(stageUpdateResp != null && stageUpdateResp.get("status") == "error")
+						if(stageUpdateResp != null && stageUpdateResp.get("status") == "error" && stageUpdateResp.get("code") == "RECORD_IN_BLUEPRINT")
 						{
-							resultLog = resultLog + "WARNING: Deal Stage update to '" + targetStage + "' FAILED for BD ID " + bdUserId + " (likely blocked by an active Blueprint - Stage must be advanced through the blueprint process) - Zoho response: " + stageUpdateResp + "\n";
+							resultLog = resultLog + "Deal Stage is Blueprint-locked for BD ID " + bdUserId + " - attempting Blueprint transition to '" + targetStage + "'\n";
+							try
+							{
+								bpTransitionId = "";
+								bpAvailableNames = "";
+								bpGetResp = invokeurl
+								[
+									url :"https://www.zohoapis.com/crm/v2/Deals/" + dealId + "/actions/blueprint"
+									type :GET
+									connection:"bd_sync_blueprint_connection"
+								];
+								bpDataList = bpGetResp.get("blueprint");
+								if(bpDataList != null && bpDataList.size() > 0)
+								{
+									bpTransitions = bpDataList.get(0).get("transitions");
+									if(bpTransitions != null)
+									{
+										for each  bpTransition in bpTransitions
+										{
+											bpTransitionName = bpTransition.get("name");
+											if(bpAvailableNames != "")
+											{
+												bpAvailableNames = bpAvailableNames + ", ";
+											}
+											bpAvailableNames = bpAvailableNames + bpTransitionName;
+											if(bpTransitionName != null && bpTransitionName.toString().trim().equalsIgnoreCase(targetStage))
+											{
+												bpTransitionId = bpTransition.get("id");
+											}
+										}
+									}
+								}
+								if(bpTransitionId != null && bpTransitionId != "")
+								{
+									bpTransitionList = List();
+									bpTransitionMap = Map();
+									bpTransitionMap.put("transition_id",bpTransitionId);
+									bpTransitionMap.put("data",Map());
+									bpTransitionList.add(bpTransitionMap);
+									bpParams = Map();
+									bpParams.put("blueprint",bpTransitionList);
+									bpPutResp = invokeurl
+									[
+										url :"https://www.zohoapis.com/crm/v2/Deals/" + dealId + "/actions/blueprint"
+										type :PUT
+										parameters:bpParams.toString()
+										connection:"bd_sync_blueprint_connection"
+									];
+									// Mirrors the zoho.crm.updateRecord response shape
+									// learned earlier: a genuine success carries no
+									// explicit "status" marker, only an error response
+									// does - so failure is detected by an explicit
+									// "error" status, not by requiring "success".
+									bpTransitionOk = true;
+									if(bpPutResp == null)
+									{
+										bpTransitionOk = false;
+									}
+									else if(bpPutResp.get("status") == "error")
+									{
+										bpTransitionOk = false;
+									}
+									else
+									{
+										bpPutData = bpPutResp.get("blueprint");
+										if(bpPutData != null && bpPutData.size() > 0 && bpPutData.get(0).get("status") == "error")
+										{
+											bpTransitionOk = false;
+										}
+									}
+									if(bpTransitionOk == true)
+									{
+										resultLog = resultLog + "Deal Stage advanced to '" + targetStage + "' via Blueprint transition for BD ID " + bdUserId + "\n";
+									}
+									else
+									{
+										resultLog = resultLog + "WARNING: Blueprint transition to '" + targetStage + "' may have failed for BD ID " + bdUserId + " - Zoho response: " + bpPutResp + "\n";
+									}
+								}
+								else
+								{
+									resultLog = resultLog + "WARNING: no Blueprint transition named '" + targetStage + "' is currently available on the Deal for BD ID " + bdUserId + " (available: " + bpAvailableNames + ") - the Blueprint needs a direct transition to '" + targetStage + "' from this Deal's current stage, or it must be advanced manually\n";
+								}
+							}
+							catch (bpError)
+							{
+								resultLog = resultLog + "WARNING: Blueprint transition attempt FAILED for BD ID " + bdUserId + " - " + bpError + " (confirm the 'bd_sync_blueprint_connection' Connection exists under Setup > Developer Space > Connections with CRM scope)\n";
+							}
+						}
+						else if(stageUpdateResp != null && stageUpdateResp.get("status") == "error")
+						{
+							resultLog = resultLog + "WARNING: Deal Stage update to '" + targetStage + "' FAILED for BD ID " + bdUserId + " - Zoho response: " + stageUpdateResp + "\n";
 						}
 						else
 						{
