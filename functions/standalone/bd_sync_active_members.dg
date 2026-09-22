@@ -782,7 +782,22 @@ try
 				else
 				{
 					// ---- No Lead found - fall back to matching an existing Contact ----
-					if(bdEmail != null && bdEmail != "")
+					// ---- CONTACT_BD_ID_LOOKUP PATCH ----
+					// Search by BD_Member_ID first, same as Leads/Accounts/Deals above.
+					// A Contacts search that only tries Email/Phone misses an existing
+					// record whenever the member just edited that exact field in BD -
+					// the live API call above already reflects the NEW value, but the
+					// CRM record still has the OLD one, so the search fails to match
+					// and the edit gets written to a brand-new duplicate Contact
+					// instead of the real one. BD_Member_ID never changes, so it's a
+					// stable match regardless of what field the member just edited.
+					contactSearch = zoho.crm.searchRecords("Contacts","(BD_Member_ID:equals:" + bdUserId + ")");
+					if(contactSearch != null && contactSearch.size() > 0)
+					{
+						contactId = contactSearch.get(0).get("id");
+					}
+					// -----------------------------------------
+					if((contactId == null || contactId == "") && bdEmail != null && bdEmail != "")
 					{
 						contactSearch = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
 						if(contactSearch != null && contactSearch.size() > 0)
@@ -1341,7 +1356,83 @@ try
 					}
 					else
 					{
-						resultLog = resultLog + "WARNING: no Contact_Name found on Deal for BD ID " + bdUserId + ", contact not synced\n";
+						// ---- CONTACT_BD_ID_LOOKUP PATCH (Deal-without-Contact fallback) ----
+						// A Deal with no linked Contact_Name used to just log a warning
+						// and give up, silently dropping every info edit for that
+						// member from then on. Fall back to finding (or creating) the
+						// Contact directly and link it back onto the Deal so future
+						// syncs go through the normal dealContactId path above.
+						fallbackContactId = "";
+						fallbackContactSearch = zoho.crm.searchRecords("Contacts","(BD_Member_ID:equals:" + bdUserId + ")");
+						if(fallbackContactSearch != null && fallbackContactSearch.size() > 0)
+						{
+							fallbackContactId = fallbackContactSearch.get(0).get("id");
+						}
+						else if(bdEmail != null && bdEmail != "")
+						{
+							fallbackContactSearch = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
+							if(fallbackContactSearch != null && fallbackContactSearch.size() > 0)
+							{
+								fallbackContactId = fallbackContactSearch.get(0).get("id");
+							}
+						}
+						fallbackContactMap = Map();
+						fallbackContactMap.put("BD_Member_ID",bdUserId);
+						if(bdFirstName != null)
+						{
+							fallbackContactMap.put("First_Name",bdFirstName);
+						}
+						if(bdLastName != null && bdLastName != "")
+						{
+							fallbackContactMap.put("Last_Name",bdLastName);
+						}
+						if(bdEmail != null)
+						{
+							fallbackContactMap.put("Email",bdEmail);
+						}
+						if(bdPhone != null)
+						{
+							fallbackContactMap.put("Phone",bdPhone);
+						}
+						if(mappedPlan != null && mappedPlan != "")
+						{
+							fallbackContactMap.put("Current_Plan",mappedPlan);
+						}
+						if(topCategoryValue != null && topCategoryValue != "")
+						{
+							fallbackContactMap.put("Top_Category",topCategoryValue);
+						}
+						if(accountId != null && accountId != "")
+						{
+							fallbackContactMap.put("Account_Name",accountId);
+						}
+						if(bdProfileUrl != null && bdProfileUrl != "")
+						{
+							fallbackContactMap.put("BD_Profile_URL",bdProfileUrl);
+						}
+						if(mappedVerifiedMember != null && mappedVerifiedMember != "")
+						{
+							fallbackContactMap.put("Verified_Member",mappedVerifiedMember);
+						}
+						if(fallbackContactId != null && fallbackContactId != "")
+						{
+							zoho.crm.updateRecord("Contacts",fallbackContactId,fallbackContactMap);
+							resultLog = resultLog + "Contact matched by BD_Member_ID/Email and synced for BD ID " + bdUserId + " (Deal had no Contact_Name)\n";
+						}
+						else
+						{
+							fallbackContactResp = zoho.crm.createRecord("Contacts",fallbackContactMap);
+							fallbackContactId = fallbackContactResp.get("id");
+							resultLog = resultLog + "New Contact created for BD ID " + bdUserId + " (Deal had no Contact_Name)\n";
+						}
+						if(fallbackContactId != null && fallbackContactId != "")
+						{
+							dealContactFixMap = Map();
+							dealContactFixMap.put("Contact_Name",fallbackContactId);
+							zoho.crm.updateRecord("Deals",dealId,dealContactFixMap);
+							resultLog = resultLog + "Deal Contact_Name linked to Contact " + fallbackContactId + " for BD ID " + bdUserId + "\n";
+						}
+						// -----------------------------------------
 					}
 				}
 				else
@@ -1436,7 +1527,14 @@ try
 							dealDetails.put("Payment_Option",paymentOptionValue);
 						}
 						existingContactId = "";
-						if(bdEmail != null && bdEmail != "")
+						// ---- CONTACT_BD_ID_LOOKUP PATCH ----
+						existingContactSearch = zoho.crm.searchRecords("Contacts","(BD_Member_ID:equals:" + bdUserId + ")");
+						if(existingContactSearch != null && existingContactSearch.size() > 0)
+						{
+							existingContactId = existingContactSearch.get(0).get("id");
+						}
+						// -----------------------------------------
+						if((existingContactId == null || existingContactId == "") && bdEmail != null && bdEmail != "")
 						{
 							existingContactSearch = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
 							if(existingContactSearch != null && existingContactSearch.size() > 0)
@@ -1587,7 +1685,54 @@ try
 					else
 					{
 						newContactId = "";
-						if(bdEmail != null && bdEmail != "")
+						// ---- CONTACT_BD_ID_LOOKUP PATCH ----
+						contactSearchByBdId = zoho.crm.searchRecords("Contacts","(BD_Member_ID:equals:" + bdUserId + ")");
+						if(contactSearchByBdId != null && contactSearchByBdId.size() > 0)
+						{
+							newContactId = contactSearchByBdId.get(0).get("id");
+							contactRefreshByBdId = Map();
+							contactRefreshByBdId.put("BD_Member_ID",bdUserId);
+							if(bdFirstName != null)
+							{
+								contactRefreshByBdId.put("First_Name",bdFirstName);
+							}
+							if(bdLastName != null && bdLastName != "")
+							{
+								contactRefreshByBdId.put("Last_Name",bdLastName);
+							}
+							if(bdEmail != null)
+							{
+								contactRefreshByBdId.put("Email",bdEmail);
+							}
+							if(bdPhone != null)
+							{
+								contactRefreshByBdId.put("Phone",bdPhone);
+							}
+							if(mappedPlan != null && mappedPlan != "")
+							{
+								contactRefreshByBdId.put("Current_Plan",mappedPlan);
+							}
+							if(topCategoryValue != null && topCategoryValue != "")
+							{
+								contactRefreshByBdId.put("Top_Category",topCategoryValue);
+							}
+							if(accountId != "")
+							{
+								contactRefreshByBdId.put("Account_Name",accountId);
+							}
+							if(bdProfileUrl != null && bdProfileUrl != "")
+							{
+								contactRefreshByBdId.put("BD_Profile_URL",bdProfileUrl);
+							}
+							if(mappedVerifiedMember != null && mappedVerifiedMember != "")
+							{
+								contactRefreshByBdId.put("Verified_Member",mappedVerifiedMember);
+							}
+							zoho.crm.updateRecord("Contacts",newContactId,contactRefreshByBdId);
+							resultLog = resultLog + "Existing Contact matched by BD_Member_ID and synced for BD ID " + bdUserId + "\n";
+						}
+						// -----------------------------------------
+						if((newContactId == null || newContactId == "") && bdEmail != null && bdEmail != "")
 						{
 							contactSearchByEmail = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
 							if(contactSearchByEmail != null && contactSearchByEmail.size() > 0)
