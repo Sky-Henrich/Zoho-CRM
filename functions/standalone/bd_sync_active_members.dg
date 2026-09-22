@@ -100,6 +100,18 @@ if(body != null && body != "")
 				// explicitly as a value.
 				bdOldVerifiedFound = true;
 			}
+			// ---- VERIFIED_MEMBER_SYNC RAW-PAIR DIAGNOSTIC ----
+			// Fires for every parsed pair whose key contains "verif" -
+			// regardless of whether it matched a branch above - so the
+			// exact fieldKey/fieldValue strings the parser actually
+			// extracted are visible verbatim (quoted, to catch stray
+			// whitespace or encoding differences invisible in a normal
+			// text read). Remove once the empty bdVerifiedRaw mystery is
+			// resolved.
+			if(fieldKey.toLowerCase().contains("verif"))
+			{
+				resultLog = resultLog + "DIAGNOSTIC RAW PAIR: fieldKey='" + fieldKey + "' fieldValue='" + fieldValue + "'\n";
+			}
 		}
 	}
 }
