@@ -413,7 +413,14 @@ try
 		bdProfileUrl = "";
 		if(bdFilename != null && bdFilename != "")
 		{
-			bdProfileUrl = "https://www.igopanama.com/" + bdFilename;
+			if(bdFilename.startsWith("/"))
+			{
+				bdProfileUrl = "https://www.igopanama.com" + bdFilename;
+			}
+			else
+			{
+				bdProfileUrl = "https://www.igopanama.com/" + bdFilename;
+			}
 		}
 		// ==========================================================================
 		subSchema = u.get("subscription_schema");
