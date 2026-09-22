@@ -1098,6 +1098,7 @@ try
 					if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
 					{
 						updateMap.put("Subscription_Start_Date",null);
+						updateMap.put("Trial_Plan",null);
 					}
 					else if(subscriptionStartDate != null)
 					{
@@ -1535,6 +1536,7 @@ try
 						if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
 						{
 							dealDetails.put("Subscription_Start_Date",null);
+							dealDetails.put("Trial_Plan",null);
 						}
 						else if(subscriptionStartDate != null)
 						{
@@ -1619,6 +1621,7 @@ try
 								if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
 								{
 									dealFixMap.put("Subscription_Start_Date",null);
+									dealFixMap.put("Trial_Plan",null);
 								}
 								else if(subscriptionStartDate != null)
 								{
@@ -1895,6 +1898,7 @@ try
 						if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
 						{
 							dealMap.put("Subscription_Start_Date",null);
+							dealMap.put("Trial_Plan",null);
 						}
 						else if(subscriptionStartDate != null)
 						{
