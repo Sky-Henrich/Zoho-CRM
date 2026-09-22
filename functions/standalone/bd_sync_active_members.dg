@@ -32,6 +32,14 @@ bdSignupDateBracket = "";
 // itself already knew the correct new plan. Capture it here so it can be
 // preferred over the API value below.
 bdSubscriptionNameBracket = "";
+// ---- CLAIMABLE_REACTIVATION PATCH (1 of 3) ----
+// Detects a Claimable -> re-listed transition: old_user[subscription_name]
+// carries the plan as it stood BEFORE this admin edit, which is the only
+// reliable way to tell "this Lead was Claimable and just got reactivated"
+// apart from "this is a brand-new free listing signup" - both end up with
+// the same new plan (a bare "X Listing" plan) but need a different Deal
+// Stage.
+bdOldSubscriptionNameBracket = "";
 body = crmAPIRequest.get("body");
 if(body != null && body != "")
 {
@@ -89,6 +97,12 @@ if(body != null && body != "")
 			else if(fieldKey == "user[subscription_name]")
 			{
 				bdSubscriptionNameBracket = fieldValue;
+			}
+			// -----------------------------------------
+			// ---- CLAIMABLE_REACTIVATION PATCH (2 of 3) ----
+			else if(fieldKey == "old_user[subscription_name]")
+			{
+				bdOldSubscriptionNameBracket = fieldValue;
 			}
 			// -----------------------------------------
 			else if(fieldKey == "user[verified]")
@@ -472,6 +486,22 @@ try
 			rawPlan = decodedSubscriptionName;
 		}
 		// ==================================================================================
+		// ---- CLAIMABLE_REACTIVATION PATCH (3 of 3) ----
+		// wasClaimable is true only when this specific webhook shows the
+		// plan just changed FROM "Claimable" - distinguishes a lapsed
+		// listing being reactivated from a brand-new free listing signup,
+		// both of which end up on the same new plan ("X Listing") but need
+		// different Deal Stages (used further below).
+		wasClaimable = false;
+		if(bdOldSubscriptionNameBracket != null && bdOldSubscriptionNameBracket != "")
+		{
+			decodedOldSubscriptionName = bdOldSubscriptionNameBracket.replaceAll("\\+"," ").toString().trim().toLowerCase();
+			if(decodedOldSubscriptionName == "claimable")
+			{
+				wasClaimable = true;
+			}
+		}
+		// -----------------------------------------
 		planPrice = null;
 		revenueMap = u.get("revenue");
 		if(revenueMap != null && revenueMap.get("paid") != null)
@@ -932,6 +962,16 @@ try
 			{
 				targetStage = "Closed Won";
 			}
+			// ---- CLAIMABLE_REACTIVATION PATCH: Free Trial override ----
+			// A lapsed (Claimable) listing that an admin verifies and moves
+			// back onto a "X Listing" plan is a re-activation, not a brand-
+			// new free signup - it should land on "Free Trial", not the
+			// usual "Sales Outreach" a fresh Listing signup gets.
+			if(isSalesOutreachListingPlan == true && wasClaimable == true && mappedVerifiedMember == "YES - Verified")
+			{
+				targetStage = "Free Trial";
+			}
+			// -----------------------------------------
 			// ==================================================================================
 			try
 			{
