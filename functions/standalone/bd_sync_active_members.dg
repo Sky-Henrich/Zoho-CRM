@@ -248,6 +248,11 @@ planMap.put("relocate verificado","Relocate Verificado");
 planMap.put("relocate impulso","Relocate Impulso");
 planMap.put("individual","Individual");
 planMap.put("community","Community");
+// A listing can revert to this named plan state (not an error/data
+// anomaly) when it lapses out of BD's monitoring process - mapping it
+// explicitly avoids a spurious "unmapped plan value" warning on every
+// occurrence and gives Current_Plan a clean, intentional value.
+planMap.put("claimable","Claimable");
 topCategoryMap = Map();
 topCategoryMap.put("experience listing","Experience");
 topCategoryMap.put("experience verificado","Experience");
@@ -312,15 +317,6 @@ try
 	{
 		u = userList.get(0);
 		userActive = u.get("active");
-		// ---- CLAIMABLE_SIGNAL DIAGNOSTIC ----
-		// "Claimable" status should route a Deal to Sales Outreach rather
-		// than being silently skipped (userActive==2 currently gates the
-		// whole Closed Won/Sales Outreach branch), but the exact field/value
-		// BD uses for it isn't confirmed yet. Logs candidate fields on every
-		// run so a test against a known Claimable member reveals the real
-		// signal instead of guessing at one. Remove once confirmed and wired
-		// into the branch condition.
-		resultLog = resultLog + "DIAGNOSTIC: active='" + userActive + "' status='" + u.get("status") + "' claimable='" + u.get("claimable") + "' listing_status='" + u.get("listing_status") + "' for BD ID " + bdUserId + "\n";
 		transactionIsPaid = false;
 		transactionsList = u.get("transactions");
 		if(transactionsList != null && transactionsList != false)
