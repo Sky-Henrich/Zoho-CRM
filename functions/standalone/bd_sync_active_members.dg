@@ -1003,31 +1003,38 @@ try
 								// crashing so the actual shape is visible for a fix
 								// rather than guessed at again.
 								bpBlueprintNode = bpGetResp.get("blueprint");
-								bpFirstEntry = null;
-								if(bpBlueprintNode != null)
+								bpFirstEntry = bpBlueprintNode;
+								bpListEntry = bpBlueprintNode.get(0);
+								if(bpListEntry != null)
 								{
-									bpListEntry = bpBlueprintNode.get(0);
-									if(bpListEntry != null)
-									{
-										bpFirstEntry = bpListEntry;
-									}
-									else
-									{
-										bpFirstEntry = bpBlueprintNode;
-									}
+									bpFirstEntry = bpListEntry;
 								}
-								bpTransitions = null;
+								bpTransitionsA = "";
+								bpTransitionsB = "";
 								if(bpFirstEntry != null)
 								{
-									bpTransitions = bpFirstEntry.get("transition");
-									if(bpTransitions == null)
-									{
-										bpTransitions = bpFirstEntry.get("transitions");
-									}
+									bpTransitionsA = bpFirstEntry.get("transition");
+									bpTransitionsB = bpFirstEntry.get("transitions");
 								}
-								if(bpTransitions != null)
+								// Deluge's editor won't accept a "for each" loop whose
+								// source variable was assigned conditionally through two
+								// different paths (tried that first and it failed to save
+								// with "Variable is not defined"). Merging both candidate
+								// lists into a single List() via addAll() keeps the loop's
+								// source variable as one unambiguous, directly-constructed
+								// List the editor is happy with.
+								bpTransitionsCombined = List();
+								if(bpTransitionsA != null && bpTransitionsA != "")
 								{
-									for each  bpTransition in bpTransitions
+									bpTransitionsCombined.addAll(bpTransitionsA);
+								}
+								if(bpTransitionsB != null && bpTransitionsB != "")
+								{
+									bpTransitionsCombined.addAll(bpTransitionsB);
+								}
+								if(bpTransitionsCombined.size() > 0)
+								{
+									for each  bpTransition in bpTransitionsCombined
 									{
 										bpTransitionName = bpTransition.get("name");
 										if(bpAvailableNames != "")
