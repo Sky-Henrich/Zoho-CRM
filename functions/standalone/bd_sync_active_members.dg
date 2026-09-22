@@ -197,6 +197,14 @@ else if(bdOldVerifiedFound == true)
 	mappedVerifiedMember = "NO - Not Verified";
 	resultLog = resultLog + "Verified Member inferred as NOT verified (field omitted from payload after previously being set) for BD ID " + bdUserId + "\n";
 }
+// ---- VERIFIED_MEMBER_SYNC DIAGNOSTIC ----
+// Logged on every run (not just warnings) to isolate whether a sync
+// failure is this code computing the wrong value, or the CRM silently
+// rejecting a correctly-computed value (e.g. the picklist's actual
+// stored value differing from its displayed label "YES - Verified" /
+// "NO - Not Verified" - a common Zoho gotcha). Remove once confirmed
+// working.
+resultLog = resultLog + "DIAGNOSTIC: bdVerifiedRaw='" + bdVerifiedRaw + "' bdOldVerifiedFound=" + bdOldVerifiedFound + " mappedVerifiedMember='" + mappedVerifiedMember + "' for BD ID " + bdUserId + "\n";
 // ==================================================================================
 planMap = Map();
 planMap.put("listing","Listing");
