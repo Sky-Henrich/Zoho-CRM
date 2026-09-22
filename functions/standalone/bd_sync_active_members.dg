@@ -1072,10 +1072,23 @@ try
 					{
 						updateMap.put("Deal_Name",dealNameValue);
 					}
-					if(subscriptionStartDate != null)
+					// ---- FREE_PLAN_BLANK_DATES PATCH ----
+					// No real payment cycle (paymentOptionValue empty) and no
+					// real amount due means this is a genuinely free plan or
+					// an untracked trial - Subscription_Start_Date should
+					// stay blank rather than carry a stale/misleading date
+					// (and Renewal_Due_Date, a formula off Subscription_Start
+					// _Date + Payment_Option, should then resolve to blank on
+					// its own since both its inputs are blank).
+					if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
+					{
+						updateMap.put("Subscription_Start_Date",null);
+					}
+					else if(subscriptionStartDate != null)
 					{
 						updateMap.put("Subscription_Start_Date",subscriptionStartDate);
 					}
+					// -----------------------------------------
 					if(paymentOptionValue != null && paymentOptionValue != "")
 					{
 						updateMap.put("Payment_Option",paymentOptionValue);
@@ -1427,10 +1440,16 @@ try
 						{
 							dealDetails.put("Account_Name",accountId);
 						}
-						if(subscriptionStartDate != null)
+						// ---- FREE_PLAN_BLANK_DATES PATCH ----
+						if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
+						{
+							dealDetails.put("Subscription_Start_Date",null);
+						}
+						else if(subscriptionStartDate != null)
 						{
 							dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
 						}
+						// -----------------------------------------
 						if(paymentOptionValue != null && paymentOptionValue != "")
 						{
 							dealDetails.put("Payment_Option",paymentOptionValue);
@@ -1498,10 +1517,16 @@ try
 									dealFixMap.put("Verified_Member",mappedVerifiedMember);
 								}
 								// -----------------------------------------
-								if(subscriptionStartDate != null)
+								// ---- FREE_PLAN_BLANK_DATES PATCH ----
+								if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
+								{
+									dealFixMap.put("Subscription_Start_Date",null);
+								}
+								else if(subscriptionStartDate != null)
 								{
 									dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
 								}
+								// -----------------------------------------
 								if(paymentOptionValue != null && paymentOptionValue != "")
 								{
 									dealFixMap.put("Payment_Option",paymentOptionValue);
@@ -1721,10 +1746,16 @@ try
 							dealMap.put("Verified_Member",mappedVerifiedMember);
 						}
 						// -----------------------------------------
-						if(subscriptionStartDate != null)
+						// ---- FREE_PLAN_BLANK_DATES PATCH ----
+						if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
+						{
+							dealMap.put("Subscription_Start_Date",null);
+						}
+						else if(subscriptionStartDate != null)
 						{
 							dealMap.put("Subscription_Start_Date",subscriptionStartDate);
 						}
+						// -----------------------------------------
 						if(paymentOptionValue != null && paymentOptionValue != "")
 						{
 							dealMap.put("Payment_Option",paymentOptionValue);
