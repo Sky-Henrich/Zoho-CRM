@@ -808,14 +808,18 @@ try
 						// actually changed. Capture and check the response so a
 						// real rejection shows up in resultLog with Zoho's own
 						// error message instead of a false success line.
+						// Zoho's success response is just the updated record's
+						// fields (id, Modified_Time, ...) - no "status" key at
+						// all. Only an error response carries "status":"error",
+						// so that's what failure is keyed off of here.
 						acctUpdateResp = zoho.crm.updateRecord("Accounts",accountId,acctUpdate);
-						if(acctUpdateResp != null && acctUpdateResp.get("status") == "success")
+						if(acctUpdateResp != null && acctUpdateResp.get("status") == "error")
 						{
-							resultLog = resultLog + "Existing Account matched/updated for BD ID " + bdUserId + " (" + acctNameToUse + ")\n";
+							resultLog = resultLog + "ERROR: Account update FAILED for BD ID " + bdUserId + " (" + acctNameToUse + ") - Zoho response: " + acctUpdateResp + "\n";
 						}
 						else
 						{
-							resultLog = resultLog + "ERROR: Account update FAILED for BD ID " + bdUserId + " (" + acctNameToUse + ") - Zoho response: " + acctUpdateResp + "\n";
+							resultLog = resultLog + "Existing Account matched/updated for BD ID " + bdUserId + " (" + acctNameToUse + ")\n";
 						}
 						// -----------------------------------------
 					}
@@ -862,11 +866,18 @@ try
 							dealContactId = dealContactId.get("id");
 						}
 					}
+					// ---- BLUEPRINT_STAGE_SPLIT PATCH ----
+					// "Stage" is governed by a Blueprint process on Deals. When a
+					// Deal is mid-blueprint, Zoho rejects the ENTIRE updateRecord
+					// call if "Stage" is included in the same request map -
+					// RECORD_IN_BLUEPRINT / "Stage cannot be updated as it is in
+					// blueprint" - which was taking Current_Plan (and every other
+					// field bundled into the same call) down with it. Stage is
+					// now updated in its own separate call below so a blueprint
+					// rejection there can no longer block Current_Plan from
+					// saving.
+					stageChanged = currentStage != targetStage;
 					updateMap = Map();
-					if(currentStage != targetStage)
-					{
-						updateMap.put("Stage",targetStage);
-					}
 					if(accountId != "")
 					{
 						updateMap.put("Account_Name",accountId);
@@ -926,17 +937,40 @@ try
 						// exactly) was reported as "Deal updated" even though the
 						// field never changed, which is exactly the symptom of
 						// Current_Plan not reflecting after a BD plan change.
+						// Zoho's success response for updateRecord is just the
+						// updated record's fields (id, Modified_Time, ...) - it does
+						// NOT include a "status" key. Only error responses carry
+						// "status":"error". So failure is detected by status=="error",
+						// not by requiring status=="success".
 						dealUpdateResp = zoho.crm.updateRecord("Deals",dealId,updateMap);
-						if(dealUpdateResp != null && dealUpdateResp.get("status") == "success")
-						{
-							resultLog = resultLog + "Deal updated for BD ID " + bdUserId + "\n";
-						}
-						else
+						if(dealUpdateResp != null && dealUpdateResp.get("status") == "error")
 						{
 							resultLog = resultLog + "ERROR: Deal update FAILED for BD ID " + bdUserId + " - Current_Plan may not have changed - Zoho response: " + dealUpdateResp + "\n";
 						}
+						else
+						{
+							resultLog = resultLog + "Deal updated for BD ID " + bdUserId + "\n";
+						}
 						// -----------------------------------------
 					}
+					// ---- BLUEPRINT_STAGE_SPLIT PATCH (Stage updated separately) ----
+					// Kept out of updateMap above so a blueprint rejection here
+					// never blocks Current_Plan/Amount/Top_Category/etc from saving.
+					if(stageChanged == true)
+					{
+						stageUpdateMap = Map();
+						stageUpdateMap.put("Stage",targetStage);
+						stageUpdateResp = zoho.crm.updateRecord("Deals",dealId,stageUpdateMap);
+						if(stageUpdateResp != null && stageUpdateResp.get("status") == "error")
+						{
+							resultLog = resultLog + "WARNING: Deal Stage update to '" + targetStage + "' FAILED for BD ID " + bdUserId + " (likely blocked by an active Blueprint - Stage must be advanced through the blueprint process) - Zoho response: " + stageUpdateResp + "\n";
+						}
+						else
+						{
+							resultLog = resultLog + "Deal Stage updated to '" + targetStage + "' for BD ID " + bdUserId + "\n";
+						}
+					}
+					// -----------------------------------------
 					if(dealContactId != null && dealContactId != "")
 					{
 						contactUpdate = Map();
@@ -1143,14 +1177,16 @@ try
 									dealFixMap.put("Payment_Option",paymentOptionValue);
 								}
 								// ---- RESPONSE_VALIDATION PATCH (3 of 4) ----
+								// Success responses have no "status" key (just the
+								// record fields) - only errors carry "status":"error".
 								dealFixResp = zoho.crm.updateRecord("Deals",newDealIdFromConversion,dealFixMap);
-								if(dealFixResp != null && dealFixResp.get("status") == "success")
+								if(dealFixResp != null && dealFixResp.get("status") == "error")
 								{
-									resultLog = resultLog + "Deal Current_Plan/Top_Category/BD_Member_ID/Subscription_Start_Date/Payment_Option force-synced after conversion for BD ID " + bdUserId + "\n";
+									resultLog = resultLog + "ERROR: post-conversion Deal force-sync FAILED for BD ID " + bdUserId + " - Current_Plan may not have changed - Zoho response: " + dealFixResp + "\n";
 								}
 								else
 								{
-									resultLog = resultLog + "ERROR: post-conversion Deal force-sync FAILED for BD ID " + bdUserId + " - Current_Plan may not have changed - Zoho response: " + dealFixResp + "\n";
+									resultLog = resultLog + "Deal Current_Plan/Top_Category/BD_Member_ID/Subscription_Start_Date/Payment_Option force-synced after conversion for BD ID " + bdUserId + "\n";
 								}
 								// -----------------------------------------
 							}
@@ -1358,14 +1394,16 @@ try
 							dealMap.put("Payment_Option",paymentOptionValue);
 						}
 						// ---- RESPONSE_VALIDATION PATCH (4 of 4) ----
+						// Success responses have no "status" key (just the record
+						// fields) - only errors carry "status":"error".
 						newDealResp = zoho.crm.createRecord("Deals",dealMap);
-						if(newDealResp != null && newDealResp.get("status") == "success")
+						if(newDealResp != null && newDealResp.get("status") == "error")
 						{
-							resultLog = resultLog + "New Deal created directly for unsynced BD ID " + bdUserId + "\n";
+							resultLog = resultLog + "ERROR: New Deal creation FAILED for BD ID " + bdUserId + " - Zoho response: " + newDealResp + "\n";
 						}
 						else
 						{
-							resultLog = resultLog + "ERROR: New Deal creation FAILED for BD ID " + bdUserId + " - Zoho response: " + newDealResp + "\n";
+							resultLog = resultLog + "New Deal created directly for unsynced BD ID " + bdUserId + "\n";
 						}
 						// -----------------------------------------
 					}
