@@ -790,6 +790,9 @@ try
 					{
 						leadTagUpdate = Map();
 						leadTagUpdate.put("BD_Member_ID",bdUserId);
+						// ---- LEAD_SOURCE_IGP PATCH ----
+						leadTagUpdate.put("Lead_Source","IGP");
+						// -----------------------------------------
 						if(bdFirstName != null)
 						{
 							leadTagUpdate.put("First_Name",bdFirstName);
