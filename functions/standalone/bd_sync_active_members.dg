@@ -960,6 +960,18 @@ try
 			// listing plans - it's the general "still in the funnel, not yet
 			// won" stage now, not just the free-listing-specific one.
 			targetStage = "Sales Outreach";
+			// ---- CLAIMABLE_CONVERSION_GATE PATCH: default ----
+			// Defined here, at the top of the whole branch, so every path
+			// through it (existing Deal found, no Lead found, direct
+			// creation) has a safe default and behaves exactly as before.
+			// Only the "Lead found, was Claimable, not yet Verified" case
+			// further below sets this to false - which must also stop the
+			// stale-Lead cleanup step at the end of this branch from
+			// deleting that same Lead (it used to run unconditionally,
+			// assuming any Lead found here was stale now that a Deal
+			// exists - wrong when conversion was correctly skipped).
+			canConvertLead = true;
+			// -----------------------------------------
 			if(isSalesOutreachListingPlan == false && safeAmount != null && safeAmount > 0 && isVerificadoOrImpulsoPlan == true)
 			{
 				targetStage = "Closed Won";
@@ -2088,6 +2100,16 @@ try
 			}
 			try
 			{
+				// ---- CLAIMABLE_CONVERSION_GATE PATCH: cleanup guard ----
+				// This cleanup assumes any Lead still found here is a stale
+				// duplicate now that a Deal exists - true whenever a
+				// conversion actually happened (or an existing Deal already
+				// covers this member), but NOT when canConvertLead blocked
+				// the conversion this run. Deleting a Lead that's correctly
+				// waiting on Verified=YES would destroy it with nothing to
+				// show for it - skip cleanup entirely in that case.
+				if(canConvertLead == true)
+				{
 				cleanupMatches = zoho.crm.searchRecords("Leads","(BD_Member_ID:equals:" + bdUserId + ")");
 				if((cleanupMatches == null || cleanupMatches.size() == 0) && bdEmail != null && bdEmail != "")
 				{
@@ -2111,6 +2133,11 @@ try
 						zoho.crm.invokeConnector("crm.delete",deleteMap);
 						resultLog = resultLog + "Removed stale Lead " + staleLead.get("id") + " for paid BD ID " + bdUserId + "\n";
 					}
+				}
+				}
+				else
+				{
+					resultLog = resultLog + "Stale-Lead cleanup skipped for BD ID " + bdUserId + " - conversion was blocked, so this Lead is still legitimately waiting on Verified=YES\n";
 				}
 			}
 			catch (cleanupError)
