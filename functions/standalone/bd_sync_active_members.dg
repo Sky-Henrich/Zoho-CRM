@@ -882,6 +882,7 @@ try
 				// ---- Final Contact field sync - covers matched, converted, or about-to-be-created ----
 				contactMap = Map();
 				contactMap.put("BD_Member_ID",bdUserId);
+				contactMap.put("Lead_Source","IGP");
 				if(bdFirstName != null)
 				{
 					contactMap.put("First_Name",bdFirstName);
@@ -1121,6 +1122,9 @@ try
 					// saving.
 					stageChanged = currentStage != targetStage;
 					updateMap = Map();
+					// ---- LEAD_SOURCE_IGP PATCH ----
+					updateMap.put("Lead_Source","IGP");
+					// -----------------------------------------
 					if(accountId != "")
 					{
 						updateMap.put("Account_Name",accountId);
@@ -1402,6 +1406,7 @@ try
 					{
 						contactUpdate = Map();
 						contactUpdate.put("BD_Member_ID",bdUserId);
+						contactUpdate.put("Lead_Source","IGP");
 						if(bdFirstName != null)
 						{
 							contactUpdate.put("First_Name",bdFirstName);
@@ -1472,6 +1477,7 @@ try
 						}
 						fallbackContactMap = Map();
 						fallbackContactMap.put("BD_Member_ID",bdUserId);
+						fallbackContactMap.put("Lead_Source","IGP");
 						if(bdFirstName != null)
 						{
 							fallbackContactMap.put("First_Name",bdFirstName);
@@ -1570,6 +1576,7 @@ try
 						dealDetails.put("Stage",targetStage);
 						dealDetails.put("Closing_Date",zoho.currentdate);
 						dealDetails.put("BD_Member_ID",bdUserId);
+						dealDetails.put("Lead_Source","IGP");
 						if(safeAmount != null)
 						{
 							dealDetails.put("Amount",safeAmount);
@@ -1663,6 +1670,7 @@ try
 								newDealIdFromConversion = convertResp.get("Deals");
 								dealFixMap = Map();
 								dealFixMap.put("BD_Member_ID",bdUserId);
+								dealFixMap.put("Lead_Source","IGP");
 								if(mappedPlan != null && mappedPlan != "")
 								{
 									dealFixMap.put("Current_Plan",mappedPlan);
@@ -1757,6 +1765,7 @@ try
 							{
 								postConvertContactUpdate = Map();
 								postConvertContactUpdate.put("BD_Member_ID",bdUserId);
+								postConvertContactUpdate.put("Lead_Source","IGP");
 								if(mappedPlan != null && mappedPlan != "")
 								{
 									postConvertContactUpdate.put("Current_Plan",mappedPlan);
@@ -1800,6 +1809,7 @@ try
 							newContactId = contactSearchByBdId.get(0).get("id");
 							contactRefreshByBdId = Map();
 							contactRefreshByBdId.put("BD_Member_ID",bdUserId);
+							contactRefreshByBdId.put("Lead_Source","IGP");
 							if(bdFirstName != null)
 							{
 								contactRefreshByBdId.put("First_Name",bdFirstName);
@@ -1848,6 +1858,7 @@ try
 								newContactId = contactSearchByEmail.get(0).get("id");
 								contactRefresh = Map();
 								contactRefresh.put("BD_Member_ID",bdUserId);
+								contactRefresh.put("Lead_Source","IGP");
 								if(bdFirstName != null)
 								{
 									contactRefresh.put("First_Name",bdFirstName);
@@ -1895,6 +1906,7 @@ try
 						{
 							contactMap = Map();
 							contactMap.put("BD_Member_ID",bdUserId);
+							contactMap.put("Lead_Source","IGP");
 							contactMap.put("First_Name",bdFirstName);
 							contactMap.put("Last_Name",bdLastName);
 							contactMap.put("Email",bdEmail);
@@ -1932,6 +1944,7 @@ try
 						dealMap.put("Closing_Date",zoho.currentdate);
 						dealMap.put("Contact_Name",newContactId);
 						dealMap.put("BD_Member_ID",bdUserId);
+						dealMap.put("Lead_Source","IGP");
 						if(accountId != "")
 						{
 							dealMap.put("Account_Name",accountId);
