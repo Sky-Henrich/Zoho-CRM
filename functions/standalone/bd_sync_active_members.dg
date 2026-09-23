@@ -1579,6 +1579,23 @@ try
 						leadTagUpdate = Map();
 						leadTagUpdate.put("BD_Member_ID",bdUserId);
 						leadTagUpdate.put("Lead_Source","IGP");
+						// ---- CLAIMABLE_CONVERSION_GATE PATCH: Current_Plan on Lead ----
+						// This map never included Current_Plan/Top_Category at
+						// all, so a Lead correctly held back from converting
+						// (not yet Verified) kept showing its OLD plan
+						// ("Claimable") even after BD already reflected the
+						// new Listing plan - nothing admins could see to know
+						// this Lead was ready for the verification step. Sync
+						// them here regardless of conversion outcome.
+						if(mappedPlan != null && mappedPlan != "")
+						{
+							leadTagUpdate.put("Current_Plan",mappedPlan);
+						}
+						if(topCategoryValue != null && topCategoryValue != "")
+						{
+							leadTagUpdate.put("Top_Category",topCategoryValue);
+						}
+						// -----------------------------------------
 						// ---- BD_PROFILE_URL PATCH (5 of 10) ----
 						if(bdProfileUrl != null && bdProfileUrl != "")
 						{
