@@ -32,6 +32,13 @@ bdSignupDateBracket = "";
 // itself already knew the correct new plan. Capture it here so it can be
 // preferred over the API value below.
 bdSubscriptionNameBracket = "";
+// ---- CLAIMABLE_CONVERSION_GATE PATCH (1 of 4) ----
+// Detects a Claimable -> re-listed transition: old_user[subscription_name]
+// carries the plan as it stood BEFORE this admin edit. Needed to scope the
+// "must be verified before converting to a Deal" rule to leads that
+// actually came from Claimable, without affecting a brand-new public
+// signup's normal (unverified-OK) conversion behavior.
+bdOldSubscriptionNameBracket = "";
 body = crmAPIRequest.get("body");
 if(body != null && body != "")
 {
@@ -89,6 +96,12 @@ if(body != null && body != "")
 			else if(fieldKey == "user[subscription_name]")
 			{
 				bdSubscriptionNameBracket = fieldValue;
+			}
+			// -----------------------------------------
+			// ---- CLAIMABLE_CONVERSION_GATE PATCH (2 of 4) ----
+			else if(fieldKey == "old_user[subscription_name]")
+			{
+				bdOldSubscriptionNameBracket = fieldValue;
 			}
 			// -----------------------------------------
 			else if(fieldKey == "user[verified]")
@@ -472,6 +485,21 @@ try
 			rawPlan = decodedSubscriptionName;
 		}
 		// ==================================================================================
+		// ---- CLAIMABLE_CONVERSION_GATE PATCH (3 of 4) ----
+		// wasClaimable is true only when this specific webhook shows the plan
+		// just changed FROM "Claimable" - used further below to require
+		// Verified=YES before converting such a Lead to a Deal, without
+		// affecting a brand-new public signup's normal conversion behavior.
+		wasClaimable = false;
+		if(bdOldSubscriptionNameBracket != null && bdOldSubscriptionNameBracket != "")
+		{
+			decodedOldSubscriptionName = bdOldSubscriptionNameBracket.replaceAll("\\+"," ").toString().trim().toLowerCase();
+			if(decodedOldSubscriptionName == "claimable")
+			{
+				wasClaimable = true;
+			}
+		}
+		// -----------------------------------------
 		planPrice = null;
 		revenueMap = u.get("revenue");
 		if(revenueMap != null && revenueMap.get("paid") != null)
@@ -1522,6 +1550,20 @@ try
 					{
 						leadRecord = leadMatches.get(0);
 						leadId = leadRecord.get("id");
+						// ---- CLAIMABLE_CONVERSION_GATE PATCH (4 of 4) ----
+						// A lead that just moved off Claimable onto a Listing
+						// plan must ALSO be Verified before converting to a
+						// Deal - both conditions required, matching neither
+						// being sufficient alone. Leads that were never
+						// Claimable (a brand-new public signup) are
+						// unaffected and keep converting as soon as they're
+						// on a Listing plan, same as before.
+						canConvertLead = true;
+						if(wasClaimable == true && isSalesOutreachListingPlan == true && mappedVerifiedMember != "YES - Verified")
+						{
+							canConvertLead = false;
+						}
+						// -----------------------------------------
 						leadTagUpdate = Map();
 						leadTagUpdate.put("BD_Member_ID",bdUserId);
 						leadTagUpdate.put("Lead_Source","IGP");
@@ -1538,264 +1580,271 @@ try
 						}
 						// -----------------------------------------
 						zoho.crm.updateRecord("Leads",leadId,leadTagUpdate);
-						dealDetails = Map();
-						dealDetails.put("Deal_Name",dealNameValue);
-						dealDetails.put("Stage",targetStage);
-						dealDetails.put("Closing_Date",zoho.currentdate);
-						dealDetails.put("BD_Member_ID",bdUserId);
-						dealDetails.put("Lead_Source","IGP");
-						if(safeAmount != null)
+						if(canConvertLead == true)
 						{
-							dealDetails.put("Amount",safeAmount);
-						}
-						if(mappedPlan != null && mappedPlan != "")
-						{
-							dealDetails.put("Current_Plan",mappedPlan);
-						}
-						if(topCategoryValue != null && topCategoryValue != "")
-						{
-							dealDetails.put("Top_Category",topCategoryValue);
-						}
-						// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
-						if(bdProfileUrl != null && bdProfileUrl != "")
-						{
-							dealDetails.put("BD_Profile_URL",bdProfileUrl);
-						}
-						// -----------------------------------------
-						// ---- PILLAR_MONTHLY_IMPULSO PATCH (lead->deal conversion) ----
-						if(pillarMonthlyImpulsoEN != null && pillarMonthlyImpulsoEN != "")
-						{
-							dealDetails.put("Pillar_Monthly_Impulso_EN",pillarMonthlyImpulsoEN);
-							dealDetails.put("Pillar_Monthly_Impulso_ES",pillarMonthlyImpulsoES);
-						}
-						// -----------------------------------------
-						// ---- PILLAR_ANNUAL_PRICE PATCH (lead->deal conversion) ----
-						if(pillarAnnualPriceEN != null && pillarAnnualPriceEN != "")
-						{
-							dealDetails.put("Pillar_Annual_Price_EN",pillarAnnualPriceEN);
-							dealDetails.put("Pillar_Annual_Price_ES",pillarAnnualPriceES);
-						}
-						// -----------------------------------------
-						// ---- VERIFIED_MEMBER_SYNC PATCH (12 of 20) ----
-						if(mappedVerifiedMember != null && mappedVerifiedMember != "")
-						{
-							dealDetails.put("Verified_Member",mappedVerifiedMember);
-						}
-						// -----------------------------------------
-						if(accountId != null && accountId != "")
-						{
-							dealDetails.put("Account_Name",accountId);
-						}
-						// ---- TRIAL_SUBSCRIPTION_RULES PATCH ----
-						if(isSalesOutreachListingPlan == true)
-						{
-							dealDetails.put("Trial_Plan","");
-							dealDetails.put("Subscription_Start_Date",null);
-						}
-						else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
-						{
-							dealDetails.put("Trial_Plan","Alumni Free Trial");
-							if(subscriptionStartDate != null)
+							dealDetails = Map();
+							dealDetails.put("Deal_Name",dealNameValue);
+							dealDetails.put("Stage",targetStage);
+							dealDetails.put("Closing_Date",zoho.currentdate);
+							dealDetails.put("BD_Member_ID",bdUserId);
+							dealDetails.put("Lead_Source","IGP");
+							if(safeAmount != null)
 							{
-								dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+								dealDetails.put("Amount",safeAmount);
+							}
+							if(mappedPlan != null && mappedPlan != "")
+							{
+								dealDetails.put("Current_Plan",mappedPlan);
+							}
+							if(topCategoryValue != null && topCategoryValue != "")
+							{
+								dealDetails.put("Top_Category",topCategoryValue);
+							}
+							// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+							if(bdProfileUrl != null && bdProfileUrl != "")
+							{
+								dealDetails.put("BD_Profile_URL",bdProfileUrl);
+							}
+							// -----------------------------------------
+							// ---- PILLAR_MONTHLY_IMPULSO PATCH (lead->deal conversion) ----
+							if(pillarMonthlyImpulsoEN != null && pillarMonthlyImpulsoEN != "")
+							{
+								dealDetails.put("Pillar_Monthly_Impulso_EN",pillarMonthlyImpulsoEN);
+								dealDetails.put("Pillar_Monthly_Impulso_ES",pillarMonthlyImpulsoES);
+							}
+							// -----------------------------------------
+							// ---- PILLAR_ANNUAL_PRICE PATCH (lead->deal conversion) ----
+							if(pillarAnnualPriceEN != null && pillarAnnualPriceEN != "")
+							{
+								dealDetails.put("Pillar_Annual_Price_EN",pillarAnnualPriceEN);
+								dealDetails.put("Pillar_Annual_Price_ES",pillarAnnualPriceES);
+							}
+							// -----------------------------------------
+							// ---- VERIFIED_MEMBER_SYNC PATCH (12 of 20) ----
+							if(mappedVerifiedMember != null && mappedVerifiedMember != "")
+							{
+								dealDetails.put("Verified_Member",mappedVerifiedMember);
+							}
+							// -----------------------------------------
+							if(accountId != null && accountId != "")
+							{
+								dealDetails.put("Account_Name",accountId);
+							}
+							// ---- TRIAL_SUBSCRIPTION_RULES PATCH ----
+							if(isSalesOutreachListingPlan == true)
+							{
+								dealDetails.put("Trial_Plan","");
+								dealDetails.put("Subscription_Start_Date",null);
+							}
+							else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
+							{
+								dealDetails.put("Trial_Plan","Alumni Free Trial");
+								if(subscriptionStartDate != null)
+								{
+									dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+								}
+								else
+								{
+									dealDetails.put("Subscription_Start_Date",null);
+								}
 							}
 							else
 							{
-								dealDetails.put("Subscription_Start_Date",null);
+								dealDetails.put("Trial_Plan","");
+								if(subscriptionStartDate != null)
+								{
+									dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+								}
 							}
-						}
-						else
-						{
-							dealDetails.put("Trial_Plan","");
-							if(subscriptionStartDate != null)
+							// -----------------------------------------
+							if(paymentOptionValue != null && paymentOptionValue != "")
 							{
-								dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+								dealDetails.put("Payment_Option",paymentOptionValue);
 							}
-						}
-						// -----------------------------------------
-						if(paymentOptionValue != null && paymentOptionValue != "")
-						{
-							dealDetails.put("Payment_Option",paymentOptionValue);
-						}
-						existingContactId = "";
-						// ---- CONTACT_BD_ID_LOOKUP PATCH ----
-						existingContactSearch = zoho.crm.searchRecords("Contacts","(BD_Member_ID:equals:" + bdUserId + ")");
-						if(existingContactSearch != null && existingContactSearch.size() > 0)
-						{
-							existingContactId = existingContactSearch.get(0).get("id");
-						}
-						// -----------------------------------------
-						if((existingContactId == null || existingContactId == "") && bdEmail != null && bdEmail != "")
-						{
-							existingContactSearch = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
+							existingContactId = "";
+							// ---- CONTACT_BD_ID_LOOKUP PATCH ----
+							existingContactSearch = zoho.crm.searchRecords("Contacts","(BD_Member_ID:equals:" + bdUserId + ")");
 							if(existingContactSearch != null && existingContactSearch.size() > 0)
 							{
 								existingContactId = existingContactSearch.get(0).get("id");
 							}
-						}
-						convertValues = Map();
-						convertValues.put("Deals",dealDetails);
-						if(existingContactId != null && existingContactId != "")
-						{
-							convertValues.put("Contacts",existingContactId);
-						}
-						if(accountId != null && accountId != "")
-						{
-							convertValues.put("Accounts",accountId);
-						}
-						convertValues.put("overwrite",true);
-						convertResp = zoho.crm.convertLead(leadId,convertValues);
-						resultLog = resultLog + "Lead conversion attempted for BD ID " + bdUserId + " - response: " + convertResp + "\n";
-						try
-						{
-							if(convertResp != null && convertResp.get("Deals") != null)
+							// -----------------------------------------
+							if((existingContactId == null || existingContactId == "") && bdEmail != null && bdEmail != "")
 							{
-								newDealIdFromConversion = convertResp.get("Deals");
-								dealFixMap = Map();
-								dealFixMap.put("BD_Member_ID",bdUserId);
-								dealFixMap.put("Lead_Source","IGP");
-								if(mappedPlan != null && mappedPlan != "")
+								existingContactSearch = zoho.crm.searchRecords("Contacts","(Email:equals:" + bdEmail + ")");
+								if(existingContactSearch != null && existingContactSearch.size() > 0)
 								{
-									dealFixMap.put("Current_Plan",mappedPlan);
+									existingContactId = existingContactSearch.get(0).get("id");
 								}
-								if(topCategoryValue != null && topCategoryValue != "")
+							}
+							convertValues = Map();
+							convertValues.put("Deals",dealDetails);
+							if(existingContactId != null && existingContactId != "")
+							{
+								convertValues.put("Contacts",existingContactId);
+							}
+							if(accountId != null && accountId != "")
+							{
+								convertValues.put("Accounts",accountId);
+							}
+							convertValues.put("overwrite",true);
+							convertResp = zoho.crm.convertLead(leadId,convertValues);
+							resultLog = resultLog + "Lead conversion attempted for BD ID " + bdUserId + " - response: " + convertResp + "\n";
+							try
+							{
+								if(convertResp != null && convertResp.get("Deals") != null)
 								{
-									dealFixMap.put("Top_Category",topCategoryValue);
-								}
-								// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
-								if(bdProfileUrl != null && bdProfileUrl != "")
-								{
-									dealFixMap.put("BD_Profile_URL",bdProfileUrl);
-								}
-								// -----------------------------------------
-								// ---- PILLAR_MONTHLY_IMPULSO PATCH (post-conversion force-sync) ----
-								if(pillarMonthlyImpulsoEN != null && pillarMonthlyImpulsoEN != "")
-								{
-									dealFixMap.put("Pillar_Monthly_Impulso_EN",pillarMonthlyImpulsoEN);
-									dealFixMap.put("Pillar_Monthly_Impulso_ES",pillarMonthlyImpulsoES);
-								}
-								// -----------------------------------------
-								// ---- PILLAR_ANNUAL_PRICE PATCH (post-conversion force-sync) ----
-								if(pillarAnnualPriceEN != null && pillarAnnualPriceEN != "")
-								{
-									dealFixMap.put("Pillar_Annual_Price_EN",pillarAnnualPriceEN);
-									dealFixMap.put("Pillar_Annual_Price_ES",pillarAnnualPriceES);
-								}
-								// -----------------------------------------
-								// ---- VERIFIED_MEMBER_SYNC PATCH (13 of 20) ----
-								if(mappedVerifiedMember != null && mappedVerifiedMember != "")
-								{
-									dealFixMap.put("Verified_Member",mappedVerifiedMember);
-								}
-								// -----------------------------------------
-								// ---- TRIAL_SUBSCRIPTION_RULES PATCH ----
-								if(isSalesOutreachListingPlan == true)
-								{
-									dealFixMap.put("Trial_Plan","");
-									dealFixMap.put("Subscription_Start_Date",null);
-								}
-								else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
-								{
-									dealFixMap.put("Trial_Plan","Alumni Free Trial");
-									if(subscriptionStartDate != null)
+									newDealIdFromConversion = convertResp.get("Deals");
+									dealFixMap = Map();
+									dealFixMap.put("BD_Member_ID",bdUserId);
+									dealFixMap.put("Lead_Source","IGP");
+									if(mappedPlan != null && mappedPlan != "")
 									{
-										dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+										dealFixMap.put("Current_Plan",mappedPlan);
+									}
+									if(topCategoryValue != null && topCategoryValue != "")
+									{
+										dealFixMap.put("Top_Category",topCategoryValue);
+									}
+									// ---- BD_PROFILE_URL_DEALS_ACCOUNTS PATCH ----
+									if(bdProfileUrl != null && bdProfileUrl != "")
+									{
+										dealFixMap.put("BD_Profile_URL",bdProfileUrl);
+									}
+									// -----------------------------------------
+									// ---- PILLAR_MONTHLY_IMPULSO PATCH (post-conversion force-sync) ----
+									if(pillarMonthlyImpulsoEN != null && pillarMonthlyImpulsoEN != "")
+									{
+										dealFixMap.put("Pillar_Monthly_Impulso_EN",pillarMonthlyImpulsoEN);
+										dealFixMap.put("Pillar_Monthly_Impulso_ES",pillarMonthlyImpulsoES);
+									}
+									// -----------------------------------------
+									// ---- PILLAR_ANNUAL_PRICE PATCH (post-conversion force-sync) ----
+									if(pillarAnnualPriceEN != null && pillarAnnualPriceEN != "")
+									{
+										dealFixMap.put("Pillar_Annual_Price_EN",pillarAnnualPriceEN);
+										dealFixMap.put("Pillar_Annual_Price_ES",pillarAnnualPriceES);
+									}
+									// -----------------------------------------
+									// ---- VERIFIED_MEMBER_SYNC PATCH (13 of 20) ----
+									if(mappedVerifiedMember != null && mappedVerifiedMember != "")
+									{
+										dealFixMap.put("Verified_Member",mappedVerifiedMember);
+									}
+									// -----------------------------------------
+									// ---- TRIAL_SUBSCRIPTION_RULES PATCH ----
+									if(isSalesOutreachListingPlan == true)
+									{
+										dealFixMap.put("Trial_Plan","");
+										dealFixMap.put("Subscription_Start_Date",null);
+									}
+									else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
+									{
+										dealFixMap.put("Trial_Plan","Alumni Free Trial");
+										if(subscriptionStartDate != null)
+										{
+											dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+										}
+										else
+										{
+											dealFixMap.put("Subscription_Start_Date",null);
+										}
 									}
 									else
 									{
-										dealFixMap.put("Subscription_Start_Date",null);
+										dealFixMap.put("Trial_Plan","");
+										if(subscriptionStartDate != null)
+										{
+											dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+										}
 									}
-								}
-								else
-								{
-									dealFixMap.put("Trial_Plan","");
-									if(subscriptionStartDate != null)
+									// -----------------------------------------
+									if(paymentOptionValue != null && paymentOptionValue != "")
 									{
-										dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+										dealFixMap.put("Payment_Option",paymentOptionValue);
+									}
+									// ---- RESPONSE_VALIDATION PATCH (3 of 4) ----
+									// Success responses have no "status" key (just the
+									// record fields) - only errors carry "status":"error".
+									dealFixResp = zoho.crm.updateRecord("Deals",newDealIdFromConversion,dealFixMap);
+									if(dealFixResp != null && dealFixResp.get("status") == "error")
+									{
+										resultLog = resultLog + "ERROR: post-conversion Deal force-sync FAILED for BD ID " + bdUserId + " - Current_Plan may not have changed - Zoho response: " + dealFixResp + "\n";
+									}
+									else
+									{
+										resultLog = resultLog + "Deal Current_Plan/Top_Category/BD_Member_ID/Subscription_Start_Date/Payment_Option force-synced after conversion for BD ID " + bdUserId + "\n";
+									}
+									// -----------------------------------------
+								}
+							}
+							catch (dealFixError)
+							{
+								resultLog = resultLog + "WARNING: could not force-sync Deal fields after conversion for BD ID " + bdUserId + ": " + dealFixError + "\n";
+							}
+							resultContactId = "";
+							if(existingContactId != null && existingContactId != "")
+							{
+								resultContactId = existingContactId;
+							}
+							else if(convertResp != null)
+							{
+								try
+								{
+									convertedContactRef = convertResp.get("Contacts");
+									if(convertedContactRef != null)
+									{
+										resultContactId = convertedContactRef;
 									}
 								}
-								// -----------------------------------------
-								if(paymentOptionValue != null && paymentOptionValue != "")
+								catch (parseContactError)
 								{
-									dealFixMap.put("Payment_Option",paymentOptionValue);
+									resultLog = resultLog + "WARNING: could not read new Contact id from conversion response for BD ID " + bdUserId + "\n";
 								}
-								// ---- RESPONSE_VALIDATION PATCH (3 of 4) ----
-								// Success responses have no "status" key (just the
-								// record fields) - only errors carry "status":"error".
-								dealFixResp = zoho.crm.updateRecord("Deals",newDealIdFromConversion,dealFixMap);
-								if(dealFixResp != null && dealFixResp.get("status") == "error")
+							}
+							if(resultContactId != null && resultContactId != "")
+							{
+								try
 								{
-									resultLog = resultLog + "ERROR: post-conversion Deal force-sync FAILED for BD ID " + bdUserId + " - Current_Plan may not have changed - Zoho response: " + dealFixResp + "\n";
+									postConvertContactUpdate = Map();
+									postConvertContactUpdate.put("BD_Member_ID",bdUserId);
+									postConvertContactUpdate.put("Lead_Source","IGP");
+									if(mappedPlan != null && mappedPlan != "")
+									{
+										postConvertContactUpdate.put("Current_Plan",mappedPlan);
+									}
+									if(topCategoryValue != null && topCategoryValue != "")
+									{
+										postConvertContactUpdate.put("Top_Category",topCategoryValue);
+									}
+									if(accountId != null && accountId != "")
+									{
+										postConvertContactUpdate.put("Account_Name",accountId);
+									}
+									// ---- BD_PROFILE_URL PATCH (6 of 10) ----
+									if(bdProfileUrl != null && bdProfileUrl != "")
+									{
+										postConvertContactUpdate.put("BD_Profile_URL",bdProfileUrl);
+									}
+									// -----------------------------------------
+									// ---- VERIFIED_MEMBER_SYNC PATCH (14 of 20) ----
+									if(mappedVerifiedMember != null && mappedVerifiedMember != "")
+									{
+										postConvertContactUpdate.put("Verified_Member",mappedVerifiedMember);
+									}
+									// -----------------------------------------
+									zoho.crm.updateRecord("Contacts",resultContactId,postConvertContactUpdate);
+									resultLog = resultLog + "Contact BD_Member_ID/Current_Plan/Account linked after conversion for BD ID " + bdUserId + "\n";
 								}
-								else
+								catch (postConvertError)
 								{
-									resultLog = resultLog + "Deal Current_Plan/Top_Category/BD_Member_ID/Subscription_Start_Date/Payment_Option force-synced after conversion for BD ID " + bdUserId + "\n";
+									resultLog = resultLog + "WARNING: could not update converted Contact for BD ID " + bdUserId + ": " + postConvertError + "\n";
 								}
-								// -----------------------------------------
 							}
 						}
-						catch (dealFixError)
+						else
 						{
-							resultLog = resultLog + "WARNING: could not force-sync Deal fields after conversion for BD ID " + bdUserId + ": " + dealFixError + "\n";
-						}
-						resultContactId = "";
-						if(existingContactId != null && existingContactId != "")
-						{
-							resultContactId = existingContactId;
-						}
-						else if(convertResp != null)
-						{
-							try
-							{
-								convertedContactRef = convertResp.get("Contacts");
-								if(convertedContactRef != null)
-								{
-									resultContactId = convertedContactRef;
-								}
-							}
-							catch (parseContactError)
-							{
-								resultLog = resultLog + "WARNING: could not read new Contact id from conversion response for BD ID " + bdUserId + "\n";
-							}
-						}
-						if(resultContactId != null && resultContactId != "")
-						{
-							try
-							{
-								postConvertContactUpdate = Map();
-								postConvertContactUpdate.put("BD_Member_ID",bdUserId);
-								postConvertContactUpdate.put("Lead_Source","IGP");
-								if(mappedPlan != null && mappedPlan != "")
-								{
-									postConvertContactUpdate.put("Current_Plan",mappedPlan);
-								}
-								if(topCategoryValue != null && topCategoryValue != "")
-								{
-									postConvertContactUpdate.put("Top_Category",topCategoryValue);
-								}
-								if(accountId != null && accountId != "")
-								{
-									postConvertContactUpdate.put("Account_Name",accountId);
-								}
-								// ---- BD_PROFILE_URL PATCH (6 of 10) ----
-								if(bdProfileUrl != null && bdProfileUrl != "")
-								{
-									postConvertContactUpdate.put("BD_Profile_URL",bdProfileUrl);
-								}
-								// -----------------------------------------
-								// ---- VERIFIED_MEMBER_SYNC PATCH (14 of 20) ----
-								if(mappedVerifiedMember != null && mappedVerifiedMember != "")
-								{
-									postConvertContactUpdate.put("Verified_Member",mappedVerifiedMember);
-								}
-								// -----------------------------------------
-								zoho.crm.updateRecord("Contacts",resultContactId,postConvertContactUpdate);
-								resultLog = resultLog + "Contact BD_Member_ID/Current_Plan/Account linked after conversion for BD ID " + bdUserId + "\n";
-							}
-							catch (postConvertError)
-							{
-								resultLog = resultLog + "WARNING: could not update converted Contact for BD ID " + bdUserId + ": " + postConvertError + "\n";
-							}
+							resultLog = resultLog + "Lead not converted to Deal for BD ID " + bdUserId + " - was Claimable and is now on a Listing plan, but Verified_Member is not YES yet\n";
 						}
 					}
 					else
