@@ -32,14 +32,6 @@ bdSignupDateBracket = "";
 // itself already knew the correct new plan. Capture it here so it can be
 // preferred over the API value below.
 bdSubscriptionNameBracket = "";
-// ---- CLAIMABLE_REACTIVATION PATCH (1 of 3) ----
-// Detects a Claimable -> re-listed transition: old_user[subscription_name]
-// carries the plan as it stood BEFORE this admin edit, which is the only
-// reliable way to tell "this Lead was Claimable and just got reactivated"
-// apart from "this is a brand-new free listing signup" - both end up with
-// the same new plan (a bare "X Listing" plan) but need a different Deal
-// Stage.
-bdOldSubscriptionNameBracket = "";
 body = crmAPIRequest.get("body");
 if(body != null && body != "")
 {
@@ -97,12 +89,6 @@ if(body != null && body != "")
 			else if(fieldKey == "user[subscription_name]")
 			{
 				bdSubscriptionNameBracket = fieldValue;
-			}
-			// -----------------------------------------
-			// ---- CLAIMABLE_REACTIVATION PATCH (2 of 3) ----
-			else if(fieldKey == "old_user[subscription_name]")
-			{
-				bdOldSubscriptionNameBracket = fieldValue;
 			}
 			// -----------------------------------------
 			else if(fieldKey == "user[verified]")
@@ -486,22 +472,6 @@ try
 			rawPlan = decodedSubscriptionName;
 		}
 		// ==================================================================================
-		// ---- CLAIMABLE_REACTIVATION PATCH (3 of 3) ----
-		// wasClaimable is true only when this specific webhook shows the
-		// plan just changed FROM "Claimable" - distinguishes a lapsed
-		// listing being reactivated from a brand-new free listing signup,
-		// both of which end up on the same new plan ("X Listing") but need
-		// different Deal Stages (used further below).
-		wasClaimable = false;
-		if(bdOldSubscriptionNameBracket != null && bdOldSubscriptionNameBracket != "")
-		{
-			decodedOldSubscriptionName = bdOldSubscriptionNameBracket.replaceAll("\\+"," ").toString().trim().toLowerCase();
-			if(decodedOldSubscriptionName == "claimable")
-			{
-				wasClaimable = true;
-			}
-		}
-		// -----------------------------------------
 		planPrice = null;
 		revenueMap = u.get("revenue");
 		if(revenueMap != null && revenueMap.get("paid") != null)
@@ -966,16 +936,6 @@ try
 			{
 				targetStage = "Closed Won";
 			}
-			// ---- CLAIMABLE_REACTIVATION PATCH: Free Trial override ----
-			// A lapsed (Claimable) listing that an admin verifies and moves
-			// back onto a "X Listing" plan is a re-activation, not a brand-
-			// new free signup - it should land on "Free Trial", not the
-			// usual "Sales Outreach" a fresh Listing signup gets.
-			if(isSalesOutreachListingPlan == true && wasClaimable == true && mappedVerifiedMember == "YES - Verified")
-			{
-				targetStage = "Free Trial";
-			}
-			// -----------------------------------------
 			// ==================================================================================
 			try
 			{
@@ -1087,22 +1047,6 @@ try
 					{
 						dealContactId = dealFull.get("Contact_Name");
 					}
-					// ---- CLOSED_WON_CRITERIA PATCH: Trial_Plan check ----
-					// Third Closed Won condition - the Deal's CURRENT Trial_Plan
-					// must be empty. Only meaningful for an existing Deal (a new
-					// one has no prior Trial_Plan value to check), so this
-					// downgrade only applies here, after the record's actual
-					// current value is available.
-					if(targetStage == "Closed Won" && dealFull != null)
-					{
-						dealCurrentTrialPlan = dealFull.get("Trial_Plan");
-						if(dealCurrentTrialPlan != null && dealCurrentTrialPlan != "")
-						{
-							targetStage = "Sales Outreach";
-							resultLog = resultLog + "Closed Won downgraded to Sales Outreach for BD ID " + bdUserId + " - Deal's Trial_Plan is not empty ('" + dealCurrentTrialPlan + "')\n";
-						}
-					}
-					// -----------------------------------------
 					if(dealContactId != null)
 					{
 						if(dealContactId.get("id") != null)
@@ -1171,22 +1115,45 @@ try
 					{
 						updateMap.put("Deal_Name",dealNameValue);
 					}
-					// ---- FREE_PLAN_BLANK_DATES PATCH ----
-					// No real payment cycle (paymentOptionValue empty) and no
-					// real amount due means this is a genuinely free plan or
-					// an untracked trial - Subscription_Start_Date should
-					// stay blank rather than carry a stale/misleading date
-					// (and Renewal_Due_Date, a formula off Subscription_Start
-					// _Date + Payment_Option, should then resolve to blank on
-					// its own since both its inputs are blank).
-					if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
+					// ---- TRIAL_SUBSCRIPTION_RULES PATCH ----
+					// Trial_Plan and Subscription_Start_Date depend on plan
+					// TYPE, not just whether there's an amount due:
+					//  - A bare "X Listing" plan is not a trial at all -
+					//    Trial_Plan stays empty and there's no real
+					//    subscription to track (Subscription_Start_Date
+					//    stays blank too, so the Renewal_Due_Date formula
+					//    off it resolves blank on its own).
+					//  - A Verificado/Impulso plan with $0 due IS a trial -
+					//    Trial_Plan is set to "Alumni Free Trial" and
+					//    Subscription_Start_Date is synced from the plan's
+					//    start date.
+					//  - A Verificado/Impulso plan with a real amount paid
+					//    is no longer a trial - Trial_Plan is cleared and
+					//    Subscription_Start_Date is tracked normally.
+					if(isSalesOutreachListingPlan == true)
 					{
-						updateMap.put("Subscription_Start_Date",null);
 						updateMap.put("Trial_Plan","");
+						updateMap.put("Subscription_Start_Date",null);
 					}
-					else if(subscriptionStartDate != null)
+					else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
 					{
-						updateMap.put("Subscription_Start_Date",subscriptionStartDate);
+						updateMap.put("Trial_Plan","Alumni Free Trial");
+						if(subscriptionStartDate != null)
+						{
+							updateMap.put("Subscription_Start_Date",subscriptionStartDate);
+						}
+						else
+						{
+							updateMap.put("Subscription_Start_Date",null);
+						}
+					}
+					else
+					{
+						updateMap.put("Trial_Plan","");
+						if(subscriptionStartDate != null)
+						{
+							updateMap.put("Subscription_Start_Date",subscriptionStartDate);
+						}
 					}
 					// -----------------------------------------
 					if(paymentOptionValue != null && paymentOptionValue != "")
@@ -1619,15 +1586,31 @@ try
 						{
 							dealDetails.put("Account_Name",accountId);
 						}
-						// ---- FREE_PLAN_BLANK_DATES PATCH ----
-						if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
+						// ---- TRIAL_SUBSCRIPTION_RULES PATCH ----
+						if(isSalesOutreachListingPlan == true)
 						{
-							dealDetails.put("Subscription_Start_Date",null);
 							dealDetails.put("Trial_Plan","");
+							dealDetails.put("Subscription_Start_Date",null);
 						}
-						else if(subscriptionStartDate != null)
+						else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
 						{
-							dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+							dealDetails.put("Trial_Plan","Alumni Free Trial");
+							if(subscriptionStartDate != null)
+							{
+								dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+							}
+							else
+							{
+								dealDetails.put("Subscription_Start_Date",null);
+							}
+						}
+						else
+						{
+							dealDetails.put("Trial_Plan","");
+							if(subscriptionStartDate != null)
+							{
+								dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+							}
 						}
 						// -----------------------------------------
 						if(paymentOptionValue != null && paymentOptionValue != "")
@@ -1705,15 +1688,31 @@ try
 									dealFixMap.put("Verified_Member",mappedVerifiedMember);
 								}
 								// -----------------------------------------
-								// ---- FREE_PLAN_BLANK_DATES PATCH ----
-								if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
+								// ---- TRIAL_SUBSCRIPTION_RULES PATCH ----
+								if(isSalesOutreachListingPlan == true)
 								{
-									dealFixMap.put("Subscription_Start_Date",null);
 									dealFixMap.put("Trial_Plan","");
+									dealFixMap.put("Subscription_Start_Date",null);
 								}
-								else if(subscriptionStartDate != null)
+								else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
 								{
-									dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+									dealFixMap.put("Trial_Plan","Alumni Free Trial");
+									if(subscriptionStartDate != null)
+									{
+										dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+									}
+									else
+									{
+										dealFixMap.put("Subscription_Start_Date",null);
+									}
+								}
+								else
+								{
+									dealFixMap.put("Trial_Plan","");
+									if(subscriptionStartDate != null)
+									{
+										dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+									}
 								}
 								// -----------------------------------------
 								if(paymentOptionValue != null && paymentOptionValue != "")
@@ -1987,15 +1986,31 @@ try
 							dealMap.put("Verified_Member",mappedVerifiedMember);
 						}
 						// -----------------------------------------
-						// ---- FREE_PLAN_BLANK_DATES PATCH ----
-						if(paymentOptionValue == "" && (safeAmount == null || safeAmount == 0))
+						// ---- TRIAL_SUBSCRIPTION_RULES PATCH ----
+						if(isSalesOutreachListingPlan == true)
 						{
-							dealMap.put("Subscription_Start_Date",null);
 							dealMap.put("Trial_Plan","");
+							dealMap.put("Subscription_Start_Date",null);
 						}
-						else if(subscriptionStartDate != null)
+						else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
 						{
-							dealMap.put("Subscription_Start_Date",subscriptionStartDate);
+							dealMap.put("Trial_Plan","Alumni Free Trial");
+							if(subscriptionStartDate != null)
+							{
+								dealMap.put("Subscription_Start_Date",subscriptionStartDate);
+							}
+							else
+							{
+								dealMap.put("Subscription_Start_Date",null);
+							}
+						}
+						else
+						{
+							dealMap.put("Trial_Plan","");
+							if(subscriptionStartDate != null)
+							{
+								dealMap.put("Subscription_Start_Date",subscriptionStartDate);
+							}
 						}
 						// -----------------------------------------
 						if(paymentOptionValue != null && paymentOptionValue != "")
