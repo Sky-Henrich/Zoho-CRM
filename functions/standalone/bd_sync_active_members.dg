@@ -55,7 +55,15 @@ bdBillingCycleBracket = "";
 // member's signup_date. A member can sign up on one day and have their
 // subscription (re)created later, so Subscription_Start_Date must follow
 // regdate. signup_date is kept only as a last-resort fallback.
+//
+// The upgrade/purchase webhook (purchase_status=success) carries no
+// regdate, so for that event the purchase date is taken from
+// "upgrade_in_progress" (Unix timestamp of the purchase), then from the
+// live API order matching "orderid", then today's date.
 bdSubscriptionRegDateBracket = "";
+bdOrderIdRaw = "";
+bdPurchaseStatusRaw = "";
+bdUpgradeTimestampRaw = "";
 body = crmAPIRequest.get("body");
 if(body != null && body != "")
 {
@@ -117,6 +125,18 @@ if(body != null && body != "")
 			else if(fieldKey == "subscription[regdate]")
 			{
 				bdSubscriptionRegDateBracket = fieldValue;
+			}
+			else if(fieldKey == "orderid" || fieldKey == "subscription[orderid]")
+			{
+				bdOrderIdRaw = fieldValue;
+			}
+			else if(fieldKey == "purchase_status")
+			{
+				bdPurchaseStatusRaw = fieldValue;
+			}
+			else if(fieldKey == "upgrade_in_progress")
+			{
+				bdUpgradeTimestampRaw = fieldValue;
 			}
 			// -----------------------------------------
 			else if(fieldKey == "amount")
@@ -253,6 +273,27 @@ if(bdSubscriptionRegDateBracket != null && bdSubscriptionRegDateBracket != "" &&
 	catch (regDateError)
 	{
 		resultLog = resultLog + "WARNING: could not parse subscription[regdate] '" + bdSubscriptionRegDateBracket + "' for BD ID " + bdUserId + "\n";
+	}
+}
+// Plan purchase/upgrade: upgrade_in_progress is the Unix timestamp (seconds)
+// of the purchase. Converted to a Panama-local date (fixed UTC-5, no DST).
+bdIsPlanPurchase = false;
+if(bdPurchaseStatusRaw != null && bdPurchaseStatusRaw.toLowerCase() == "success")
+{
+	bdIsPlanPurchase = true;
+}
+if(subscriptionStartDateFromWebhook == null && bdIsPlanPurchase && bdUpgradeTimestampRaw != null && bdUpgradeTimestampRaw != "" && bdUpgradeTimestampRaw != "0")
+{
+	try
+	{
+		purchaseLocalSecs = bdUpgradeTimestampRaw.toLong() - 18000;
+		purchaseDays = ((purchaseLocalSecs - purchaseLocalSecs % 86400) / 86400).toLong();
+		subscriptionStartDateFromWebhook = "1970-01-01".toDate("yyyy-MM-dd").addDay(purchaseDays);
+		subscriptionStartDate = subscriptionStartDateFromWebhook;
+	}
+	catch (upgradeTsError)
+	{
+		resultLog = resultLog + "WARNING: could not parse upgrade_in_progress '" + bdUpgradeTimestampRaw + "' for BD ID " + bdUserId + "\n";
 	}
 }
 // -----------------------------------------
@@ -427,25 +468,50 @@ try
 						{
 							bdDueDate = bdNextDueDateRaw.toDate("yyyy-MM-dd");
 						}
-						// ---- SUBSCRIPTION_CREATED_DATE PATCH (4 of 4) ----
-						// Live API fallback for BD's "Created" date when the
-						// incoming webhook didn't carry subscription[regdate].
-						if(subscriptionStartDateFromWebhook == null)
+					}
+					// ---- SUBSCRIPTION_CREATED_DATE PATCH (4 of 4) ----
+					// Live API fallback for BD's "Created" date when the
+					// incoming webhook carried neither subscription[regdate]
+					// nor a purchase timestamp. Prefer the order matching the
+					// webhook's orderid; otherwise the latest transaction.
+					if(subscriptionStartDateFromWebhook == null)
+					{
+						regDateDetails = subscriptionDetails;
+						if(bdOrderIdRaw != null && bdOrderIdRaw != "")
 						{
-							bdRegDateRaw = subscriptionDetails.get("regdate");
+							for each  tx in transactionsList
+							{
+								txSubDetails = tx.get("subscription_details");
+								if(txSubDetails != null && (txSubDetails.get("orderid") + "" == bdOrderIdRaw || txSubDetails.get("id") + "" == bdOrderIdRaw))
+								{
+									regDateDetails = txSubDetails;
+									break;
+								}
+							}
+						}
+						if(regDateDetails != null)
+						{
+							bdRegDateRaw = regDateDetails.get("regdate");
 							if(bdRegDateRaw != null && bdRegDateRaw != "" && bdRegDateRaw != "0000-00-00")
 							{
 								subscriptionStartDate = bdRegDateRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
+								subscriptionStartDateFromWebhook = subscriptionStartDate;
 							}
 						}
-						// -----------------------------------------
 					}
+					// -----------------------------------------
 				}
 			}
 			catch (txError)
 			{
 				resultLog = resultLog + "WARNING: unexpected transactions format for BD ID " + bdUserId + ": " + txError + "\n";
 			}
+		}
+		// A successful plan purchase with no date found anywhere above
+		// happened now - use today's date rather than the old signup_date.
+		if(subscriptionStartDateFromWebhook == null && bdIsPlanPurchase)
+		{
+			subscriptionStartDate = zoho.currentdate;
 		}
 		// The subscription_updated webhook's own "subscription[nextduedate]"
 		// is the freshest source available - prefer it over whatever the
