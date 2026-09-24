@@ -346,6 +346,9 @@ try
 						{
 							transactionIsPaid = true;
 						}
+						// ---- BD_DUE_DATE DIAGNOSTIC (remove once the real due-date field name is confirmed) ----
+						resultLog = resultLog + "DIAGNOSTIC latestInvoice: " + latestInvoice.toString() + "\n";
+						resultLog = resultLog + "DIAGNOSTIC transactionsList[0]: " + transactionsList.get(0).toString() + "\n";
 					}
 				}
 			}
