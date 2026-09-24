@@ -39,6 +39,15 @@ bdSubscriptionNameBracket = "";
 // actually came from Claimable, without affecting a brand-new public
 // signup's normal (unverified-OK) conversion behavior.
 bdOldSubscriptionNameBracket = "";
+// ---- BD_DUE_DATE PATCH (1 of 2) ----
+// The "subscription_updated" webhook (Admin Subscription/Invoice Action in
+// BD) posts the next payment date directly as "subscription[nextduedate]",
+// alongside "subscription[billingcycle]" for the cycle. This is the
+// freshest, most direct source available - preferred over the live BD API
+// lookup (transactions[].subscription_details.nextduedate) used as a
+// fallback for webhook types that don't carry it.
+bdNextDueDateBracket = "";
+bdBillingCycleBracket = "";
 body = crmAPIRequest.get("body");
 if(body != null && body != "")
 {
@@ -87,6 +96,16 @@ if(body != null && body != "")
 			{
 				bdMemberTypeRaw = fieldValue;
 			}
+			// ---- BD_DUE_DATE PATCH (2 of 2) ----
+			else if(fieldKey == "subscription[nextduedate]")
+			{
+				bdNextDueDateBracket = fieldValue;
+			}
+			else if(fieldKey == "subscription[billingcycle]")
+			{
+				bdBillingCycleBracket = fieldValue;
+			}
+			// -----------------------------------------
 			else if(fieldKey == "amount")
 			{
 				// ---- AMOUNT_FIX PATCH (2 of 3) ----
@@ -170,6 +189,25 @@ if(bdUserId == null || bdUserId == "")
 {
 	resultLog = resultLog + "No BD member ID found in incoming payload\n";
 	return resultLog;
+}
+if(bdMemberTypeRaw == null || bdMemberTypeRaw == "")
+{
+	if(bdBillingCycleBracket != null && bdBillingCycleBracket != "")
+	{
+		bdMemberTypeRaw = bdBillingCycleBracket;
+	}
+}
+bdDueDateFromWebhook = null;
+if(bdNextDueDateBracket != null && bdNextDueDateBracket != "" && bdNextDueDateBracket != "0000-00-00")
+{
+	try
+	{
+		bdDueDateFromWebhook = bdNextDueDateBracket.toDate("yyyy-MM-dd");
+	}
+	catch (dueDateError)
+	{
+		resultLog = resultLog + "WARNING: could not parse subscription[nextduedate] '" + bdNextDueDateBracket + "' for BD ID " + bdUserId + "\n";
+	}
 }
 subscriptionStartDate = null;
 if(bdSignupDateRaw != null && bdSignupDateRaw.length() == 14)
@@ -366,6 +404,13 @@ try
 			{
 				resultLog = resultLog + "WARNING: unexpected transactions format for BD ID " + bdUserId + ": " + txError + "\n";
 			}
+		}
+		// The subscription_updated webhook's own "subscription[nextduedate]"
+		// is the freshest source available - prefer it over whatever the
+		// live API lookup above found.
+		if(bdDueDateFromWebhook != null)
+		{
+			bdDueDate = bdDueDateFromWebhook;
 		}
 		bdCompanyName = u.get("company");
 		if(bdCompanyName != null && bdCompanyName.trim().equalsIgnoreCase("Individual"))
