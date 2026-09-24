@@ -520,6 +520,65 @@ try
 		{
 			bdDueDate = bdDueDateFromWebhook;
 		}
+		// ---- ACTIVE_SUBSCRIPTION_SYNC PATCH ----
+		// Source of truth: BD's Subscriptions tab. Whatever webhook fired,
+		// scan every order in the live API response for the one whose
+		// status (domainstatus) is "Active" and sync:
+		//   BD "Created"      (regdate)     -> Subscription_Start_Date
+		//   BD "Next Payment" (nextduedate) -> BD_Due_Date
+		// This overrides the webhook values above: the subscription_updated
+		// webhook's subscription[nextduedate] can be the pre-edit value
+		// (e.g. 2026-10-24 posted while BD shows 24/12/2026). If several
+		// orders are Active, the most recently created one wins. If none is
+		// Active (or the API omits these fields), the fallbacks above stand.
+		activeSubDetails = null;
+		activeSubRegDate = null;
+		if(transactionsList != null && transactionsList != false)
+		{
+			try
+			{
+				for each  tx in transactionsList
+				{
+					txSubDetails = tx.get("subscription_details");
+					if(txSubDetails != null && txSubDetails.get("domainstatus") != null && txSubDetails.get("domainstatus").toString().equalsIgnoreCase("Active"))
+					{
+						txRegDate = null;
+						txRegDateRaw = txSubDetails.get("regdate");
+						if(txRegDateRaw != null && txRegDateRaw != "" && txRegDateRaw != "0000-00-00")
+						{
+							txRegDate = txRegDateRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
+						}
+						if(activeSubDetails == null || (txRegDate != null && (activeSubRegDate == null || txRegDate > activeSubRegDate)))
+						{
+							activeSubDetails = txSubDetails;
+							activeSubRegDate = txRegDate;
+						}
+					}
+				}
+				if(activeSubDetails != null)
+				{
+					if(activeSubRegDate != null)
+					{
+						subscriptionStartDate = activeSubRegDate;
+					}
+					activeNextDueRaw = activeSubDetails.get("nextduedate");
+					if(activeNextDueRaw != null && activeNextDueRaw != "" && activeNextDueRaw != "0000-00-00")
+					{
+						bdDueDate = activeNextDueRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
+					}
+					resultLog = resultLog + "Active BD subscription (order " + activeSubDetails.get("id") + ") synced: Subscription_Start_Date=" + subscriptionStartDate + " BD_Due_Date=" + bdDueDate + " for BD ID " + bdUserId + "\n";
+				}
+				else
+				{
+					resultLog = resultLog + "No Active subscription found in BD API for BD ID " + bdUserId + " - using webhook/fallback dates\n";
+				}
+			}
+			catch (activeSubError)
+			{
+				resultLog = resultLog + "WARNING: could not read Active subscription for BD ID " + bdUserId + ": " + activeSubError + "\n";
+			}
+		}
+		// -----------------------------------------
 		bdCompanyName = u.get("company");
 		if(bdCompanyName != null && bdCompanyName.trim().equalsIgnoreCase("Individual"))
 		{
