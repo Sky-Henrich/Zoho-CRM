@@ -331,6 +331,7 @@ try
 		u = userList.get(0);
 		userActive = u.get("active");
 		transactionIsPaid = false;
+		bdDueDate = null;
 		transactionsList = u.get("transactions");
 		if(transactionsList != null && transactionsList != false)
 		{
@@ -346,9 +347,18 @@ try
 						{
 							transactionIsPaid = true;
 						}
-						// ---- BD_DUE_DATE DIAGNOSTIC (remove once the real due-date field name is confirmed) ----
-						resultLog = resultLog + "DIAGNOSTIC latestInvoice: " + latestInvoice.toString() + "\n";
-						resultLog = resultLog + "DIAGNOSTIC transactionsList[0]: " + transactionsList.get(0).toString() + "\n";
+					}
+					// BD's real "next payment due" date lives under subscription_details,
+					// not on the invoice itself - invoice_details.duedate is just the due
+					// date of that one (already-paid) invoice.
+					subscriptionDetails = transactionsList.get(0).get("subscription_details");
+					if(subscriptionDetails != null)
+					{
+						bdNextDueDateRaw = subscriptionDetails.get("nextduedate");
+						if(bdNextDueDateRaw != null && bdNextDueDateRaw != "" && bdNextDueDateRaw != "0000-00-00")
+						{
+							bdDueDate = bdNextDueDateRaw.toDate("yyyy-MM-dd");
+						}
 					}
 				}
 			}
@@ -1177,6 +1187,7 @@ try
 					{
 						updateMap.put("Trial_Plan","");
 						updateMap.put("Subscription_Start_Date",null);
+						updateMap.put("BD_Due_Date",null);
 					}
 					else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
 					{
@@ -1189,6 +1200,7 @@ try
 						{
 							updateMap.put("Subscription_Start_Date",null);
 						}
+						updateMap.put("BD_Due_Date",bdDueDate);
 					}
 					else
 					{
@@ -1196,6 +1208,10 @@ try
 						if(subscriptionStartDate != null)
 						{
 							updateMap.put("Subscription_Start_Date",subscriptionStartDate);
+						}
+						if(bdDueDate != null)
+						{
+							updateMap.put("BD_Due_Date",bdDueDate);
 						}
 					}
 					// -----------------------------------------
@@ -1667,6 +1683,7 @@ try
 							{
 								dealDetails.put("Trial_Plan","");
 								dealDetails.put("Subscription_Start_Date",null);
+								dealDetails.put("BD_Due_Date",null);
 							}
 							else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
 							{
@@ -1679,6 +1696,7 @@ try
 								{
 									dealDetails.put("Subscription_Start_Date",null);
 								}
+								dealDetails.put("BD_Due_Date",bdDueDate);
 							}
 							else
 							{
@@ -1686,6 +1704,10 @@ try
 								if(subscriptionStartDate != null)
 								{
 									dealDetails.put("Subscription_Start_Date",subscriptionStartDate);
+								}
+								if(bdDueDate != null)
+								{
+									dealDetails.put("BD_Due_Date",bdDueDate);
 								}
 							}
 							// -----------------------------------------
@@ -1769,6 +1791,7 @@ try
 									{
 										dealFixMap.put("Trial_Plan","");
 										dealFixMap.put("Subscription_Start_Date",null);
+										dealFixMap.put("BD_Due_Date",null);
 									}
 									else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
 									{
@@ -1781,6 +1804,7 @@ try
 										{
 											dealFixMap.put("Subscription_Start_Date",null);
 										}
+										dealFixMap.put("BD_Due_Date",bdDueDate);
 									}
 									else
 									{
@@ -1788,6 +1812,10 @@ try
 										if(subscriptionStartDate != null)
 										{
 											dealFixMap.put("Subscription_Start_Date",subscriptionStartDate);
+										}
+										if(bdDueDate != null)
+										{
+											dealFixMap.put("BD_Due_Date",bdDueDate);
 										}
 									}
 									// -----------------------------------------
@@ -1805,7 +1833,7 @@ try
 									}
 									else
 									{
-										resultLog = resultLog + "Deal Current_Plan/Top_Category/BD_Member_ID/Subscription_Start_Date/Payment_Option force-synced after conversion for BD ID " + bdUserId + "\n";
+										resultLog = resultLog + "Deal Current_Plan/Top_Category/BD_Member_ID/Subscription_Start_Date/BD_Due_Date/Payment_Option force-synced after conversion for BD ID " + bdUserId + "\n";
 									}
 									// -----------------------------------------
 								}
@@ -2072,6 +2100,7 @@ try
 						{
 							dealMap.put("Trial_Plan","");
 							dealMap.put("Subscription_Start_Date",null);
+							dealMap.put("BD_Due_Date",null);
 						}
 						else if(isVerificadoOrImpulsoPlan == true && (safeAmount == null || safeAmount == 0))
 						{
@@ -2084,6 +2113,7 @@ try
 							{
 								dealMap.put("Subscription_Start_Date",null);
 							}
+							dealMap.put("BD_Due_Date",bdDueDate);
 						}
 						else
 						{
@@ -2091,6 +2121,10 @@ try
 							if(subscriptionStartDate != null)
 							{
 								dealMap.put("Subscription_Start_Date",subscriptionStartDate);
+							}
+							if(bdDueDate != null)
+							{
+								dealMap.put("BD_Due_Date",bdDueDate);
 							}
 						}
 						// -----------------------------------------
