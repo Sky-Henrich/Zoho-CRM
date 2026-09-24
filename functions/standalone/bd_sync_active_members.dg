@@ -48,6 +48,14 @@ bdOldSubscriptionNameBracket = "";
 // fallback for webhook types that don't carry it.
 bdNextDueDateBracket = "";
 bdBillingCycleBracket = "";
+// ---- SUBSCRIPTION_CREATED_DATE PATCH (1 of 4) ----
+// BD's Subscriptions tab "Created" column is the subscription's own
+// registration date ("subscription[regdate]" in the subscription_updated
+// webhook, "subscription_details.regdate" in the live API) - NOT the
+// member's signup_date. A member can sign up on one day and have their
+// subscription (re)created later, so Subscription_Start_Date must follow
+// regdate. signup_date is kept only as a last-resort fallback.
+bdSubscriptionRegDateBracket = "";
 body = crmAPIRequest.get("body");
 if(body != null && body != "")
 {
@@ -104,6 +112,11 @@ if(body != null && body != "")
 			else if(fieldKey == "subscription[billingcycle]")
 			{
 				bdBillingCycleBracket = fieldValue;
+			}
+			// ---- SUBSCRIPTION_CREATED_DATE PATCH (2 of 4) ----
+			else if(fieldKey == "subscription[regdate]")
+			{
+				bdSubscriptionRegDateBracket = fieldValue;
 			}
 			// -----------------------------------------
 			else if(fieldKey == "amount")
@@ -226,6 +239,23 @@ if(bdSignupDateRaw != null && bdSignupDateRaw.length() == 14)
 		subscriptionStartDate = null;
 	}
 }
+// ---- SUBSCRIPTION_CREATED_DATE PATCH (3 of 4) ----
+// The webhook's subscription[regdate] (BD "Created" date) wins over
+// signup_date when present.
+subscriptionStartDateFromWebhook = null;
+if(bdSubscriptionRegDateBracket != null && bdSubscriptionRegDateBracket != "" && bdSubscriptionRegDateBracket != "0000-00-00")
+{
+	try
+	{
+		subscriptionStartDateFromWebhook = bdSubscriptionRegDateBracket.toDate("yyyy-MM-dd");
+		subscriptionStartDate = subscriptionStartDateFromWebhook;
+	}
+	catch (regDateError)
+	{
+		resultLog = resultLog + "WARNING: could not parse subscription[regdate] '" + bdSubscriptionRegDateBracket + "' for BD ID " + bdUserId + "\n";
+	}
+}
+// -----------------------------------------
 paymentOptionValue = "";
 if(bdMemberTypeRaw != null)
 {
@@ -397,6 +427,18 @@ try
 						{
 							bdDueDate = bdNextDueDateRaw.toDate("yyyy-MM-dd");
 						}
+						// ---- SUBSCRIPTION_CREATED_DATE PATCH (4 of 4) ----
+						// Live API fallback for BD's "Created" date when the
+						// incoming webhook didn't carry subscription[regdate].
+						if(subscriptionStartDateFromWebhook == null)
+						{
+							bdRegDateRaw = subscriptionDetails.get("regdate");
+							if(bdRegDateRaw != null && bdRegDateRaw != "" && bdRegDateRaw != "0000-00-00")
+							{
+								subscriptionStartDate = bdRegDateRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
+							}
+						}
+						// -----------------------------------------
 					}
 				}
 			}
