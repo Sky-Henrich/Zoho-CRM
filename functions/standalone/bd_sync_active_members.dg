@@ -1201,6 +1201,29 @@ try
 			{
 				targetStage = "Closed Won";
 			}
+			// ---- FREE_TRIAL_STAGE PATCH ----
+			// A $0 subscription whose BD Next Payment (BD_Due_Date) is exactly
+			// 3 months after its BD Created date (Subscription_Start_Date) is
+			// the free-trial offer - move the Deal to "Free Trial" instead of
+			// Sales Outreach. Listing plans are excluded (they never carry
+			// these dates). Compared as yyyy-MM-dd strings so no time
+			// component can cause a mismatch.
+			else if(isSalesOutreachListingPlan == false && (safeAmount == null || safeAmount == 0) && subscriptionStartDate != null && bdDueDate != null)
+			{
+				try
+				{
+					trialEndExpected = subscriptionStartDate.addMonth(3).toString("yyyy-MM-dd");
+					if(bdDueDate.toString("yyyy-MM-dd") == trialEndExpected)
+					{
+						targetStage = "Free Trial";
+						resultLog = resultLog + "Free Trial detected (Amount 0, BD_Due_Date " + trialEndExpected + " = Subscription_Start_Date + 3 months) for BD ID " + bdUserId + "\n";
+					}
+				}
+				catch (freeTrialError)
+				{
+					resultLog = resultLog + "WARNING: Free Trial date check failed for BD ID " + bdUserId + ": " + freeTrialError + "\n";
+				}
+			}
 			// ==================================================================================
 			try
 			{
