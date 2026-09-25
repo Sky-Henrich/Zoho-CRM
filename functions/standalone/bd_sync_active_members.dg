@@ -148,14 +148,19 @@ if(body != null && body != "")
 			// ---- UTM_SOURCE_TRACKING PATCH (2 of 4) ----
 			else if(fieldKey.contains("utm_"))
 			{
-				utmKey = fieldKey.replaceAll("^(user|member)\\[","").replaceAll("\\]$","").toLowerCase();
-				utmDecoded = zoho.encryption.urlDecode(fieldValue.replaceAll("\\+"," ")).trim();
-				// BD pre-fills Hidden Fields with their label ("UTM Source") -
-				// that placeholder is not a real value, so it is ignored.
-				utmPlaceholder = utmDecoded.toLowerCase().replaceAll("[ _-]","");
-				if((utmKey == "utm_source" || utmKey == "utm_medium" || utmKey == "utm_campaign" || utmKey == "utm_content") && utmDecoded != "" && utmPlaceholder != utmKey.replaceAll("_",""))
+				// Plain string ops only (no regex): accepts utm_x, user[utm_x] and
+				// member[utm_x]; old_user[utm_x] (the pre-edit copy) is skipped.
+				if(!fieldKey.startsWith("old_"))
 				{
-					bdUtmValues.put(utmKey,utmDecoded);
+					utmKey = fieldKey.remove("member[").remove("user[").remove("]").toLowerCase();
+					utmValue = fieldValue.trim();
+					// BD pre-fills Hidden Fields with their label ("UTM Source") -
+					// that placeholder is not a real value, so it is ignored.
+					utmPlaceholder = utmValue.toLowerCase().remove(" ").remove("_").remove("-");
+					if((utmKey == "utm_source" || utmKey == "utm_medium" || utmKey == "utm_campaign" || utmKey == "utm_content") && utmValue != "" && utmPlaceholder != utmKey.remove("_"))
+					{
+						bdUtmValues.put(utmKey,utmValue);
+					}
 				}
 			}
 			// -----------------------------------------
@@ -606,7 +611,7 @@ try
 			if(bdUtmValues.get(utmKey) == null)
 			{
 				utmApiValue = u.get(utmKey);
-				if(utmApiValue != null && utmApiValue.toString().trim() != "" && utmApiValue.toString().toLowerCase().replaceAll("[ _-]","") != utmKey.replaceAll("_",""))
+				if(utmApiValue != null && utmApiValue.toString().trim() != "" && utmApiValue.toString().toLowerCase().remove(" ").remove("_").remove("-") != utmKey.remove("_"))
 				{
 					bdUtmValues.put(utmKey,utmApiValue.toString().trim());
 				}
