@@ -2605,6 +2605,15 @@ try
 		// only logs a warning. First touch wins: a record that already has
 		// a UTM_Source is left alone, so later webhooks never overwrite the
 		// channel that originally brought the member in.
+		//
+		// ---- UTM_LEAD_SOURCE PATCH ----
+		// Any record carrying UTM values gets Lead_Source = "Meta Lead Ad"
+		// (Accounts have no Lead_Source). This runs on EVERY webhook, after
+		// the main sync above has re-written Lead_Source = "IGP", so the
+		// value doesn't flip back. It is a separate call so that, if
+		// "Meta Lead Ad" is missing from a module's Lead_Source picklist,
+		// only this write fails - the UTM fields still save.
+		utmLeadSourceValue = "Meta Lead Ad";
 		if(bdUtmValues.size() > 0)
 		{
 			utmUpdate = Map();
@@ -2622,7 +2631,8 @@ try
 						for each  utmRec in utmMatches
 						{
 							existingUtmSource = utmRec.get("UTM_Source");
-							if(existingUtmSource == null || existingUtmSource.toString().trim() == "")
+							recordHasUtm = existingUtmSource != null && existingUtmSource.toString().trim() != "";
+							if(recordHasUtm == false)
 							{
 								utmResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),utmUpdate);
 								if(utmResp != null && utmResp.get("status") == "error")
@@ -2632,8 +2642,26 @@ try
 								else
 								{
 									resultLog = resultLog + "UTM " + bdUtmValues + " saved on " + utmModule + " for BD ID " + bdUserId + "\n";
+									if(bdUtmValues.get("utm_source") != null)
+									{
+										recordHasUtm = true;
+									}
 								}
 							}
+							// ---- UTM_LEAD_SOURCE PATCH: apply ----
+							if(recordHasUtm == true && utmModule != "Accounts")
+							{
+								leadSourceResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),{"Lead_Source":utmLeadSourceValue});
+								if(leadSourceResp != null && leadSourceResp.get("status") == "error")
+								{
+									resultLog = resultLog + "WARNING: Lead_Source '" + utmLeadSourceValue + "' not saved on " + utmModule + " for BD ID " + bdUserId + " (is it in this module's Lead Source picklist?) - Zoho response: " + leadSourceResp + "\n";
+								}
+								else
+								{
+									resultLog = resultLog + "Lead_Source set to '" + utmLeadSourceValue + "' on " + utmModule + " for BD ID " + bdUserId + "\n";
+								}
+							}
+							// -----------------------------------------
 						}
 					}
 				}
