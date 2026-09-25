@@ -64,6 +64,13 @@ bdSubscriptionRegDateBracket = "";
 bdOrderIdRaw = "";
 bdPurchaseStatusRaw = "";
 bdUpgradeTimestampRaw = "";
+// ---- UTM_SOURCE_TRACKING PATCH (1 of 4) ----
+// The join/claim/business signup forms carry 4 hidden fields
+// (utm_source, utm_medium, utm_campaign, utm_content) filled in the
+// browser by the site-wide capture script (bd/utm_capture.html). BD saves
+// them on the member record, so they arrive either in the webhook body
+// (bare, user[...] or member[...] keys) or via the live user API below.
+bdUtmValues = Map();
 body = crmAPIRequest.get("body");
 if(body != null && body != "")
 {
@@ -137,6 +144,15 @@ if(body != null && body != "")
 			else if(fieldKey == "upgrade_in_progress")
 			{
 				bdUpgradeTimestampRaw = fieldValue;
+			}
+			// ---- UTM_SOURCE_TRACKING PATCH (2 of 4) ----
+			else if(fieldKey.contains("utm_"))
+			{
+				utmKey = fieldKey.replaceAll("^(user|member)\\[","").replaceAll("\\]$","").toLowerCase();
+				if((utmKey == "utm_source" || utmKey == "utm_medium" || utmKey == "utm_campaign" || utmKey == "utm_content") && fieldValue != "")
+				{
+					bdUtmValues.put(utmKey,zoho.encryption.urlDecode(fieldValue.replaceAll("\\+"," ")).trim());
+				}
 			}
 			// -----------------------------------------
 			else if(fieldKey == "amount")
@@ -576,6 +592,20 @@ try
 			catch (activeSubError)
 			{
 				resultLog = resultLog + "WARNING: could not read Active subscription for BD ID " + bdUserId + ": " + activeSubError + "\n";
+			}
+		}
+		// -----------------------------------------
+		// ---- UTM_SOURCE_TRACKING PATCH (3 of 4) ----
+		// Fill any UTM value the webhook didn't carry from the member record.
+		for each  utmKey in {"utm_source","utm_medium","utm_campaign","utm_content"}
+		{
+			if(bdUtmValues.get(utmKey) == null)
+			{
+				utmApiValue = u.get(utmKey);
+				if(utmApiValue != null && utmApiValue.toString().trim() != "")
+				{
+					bdUtmValues.put(utmKey,utmApiValue.toString().trim());
+				}
 			}
 		}
 		// -----------------------------------------
@@ -2557,6 +2587,54 @@ try
 		{
 			resultLog = resultLog + "BD ID " + bdUserId + " skipped - active: " + userActive + ", latest transaction paid: " + transactionIsPaid + ", free listing: " + isFreeListingPlan + "\n";
 		}
+		// ---- UTM_SOURCE_TRACKING PATCH (4 of 4) ----
+		// Stamp the signup's UTM values on every CRM record this member
+		// became (Individual -> Contact, Community -> Account + Contact,
+		// Business -> Lead or Contact + Deal), so channel reporting works
+		// whichever branch above ran. Runs as separate calls after the main
+		// sync so a module missing the UTM fields can never block it - it
+		// only logs a warning. First touch wins: a record that already has
+		// a UTM_Source is left alone, so later webhooks never overwrite the
+		// channel that originally brought the member in.
+		if(bdUtmValues.size() > 0)
+		{
+			utmUpdate = Map();
+			utmUpdate.put("UTM_Source",ifnull(bdUtmValues.get("utm_source"),""));
+			utmUpdate.put("UTM_Medium",ifnull(bdUtmValues.get("utm_medium"),""));
+			utmUpdate.put("UTM_Campaign",ifnull(bdUtmValues.get("utm_campaign"),""));
+			utmUpdate.put("UTM_Content",ifnull(bdUtmValues.get("utm_content"),""));
+			for each  utmModule in {"Leads","Contacts","Accounts","Deals"}
+			{
+				try
+				{
+					utmMatches = zoho.crm.searchRecords(utmModule,"(BD_Member_ID:equals:" + bdUserId + ")");
+					if(utmMatches != null && utmMatches.size() > 0)
+					{
+						for each  utmRec in utmMatches
+						{
+							existingUtmSource = utmRec.get("UTM_Source");
+							if(existingUtmSource == null || existingUtmSource.toString().trim() == "")
+							{
+								utmResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),utmUpdate);
+								if(utmResp != null && utmResp.get("status") == "error")
+								{
+									resultLog = resultLog + "WARNING: UTM fields not saved on " + utmModule + " for BD ID " + bdUserId + " (does this module have UTM_Source/UTM_Medium/UTM_Campaign/UTM_Content?) - Zoho response: " + utmResp + "\n";
+								}
+								else
+								{
+									resultLog = resultLog + "UTM " + bdUtmValues + " saved on " + utmModule + " for BD ID " + bdUserId + "\n";
+								}
+							}
+						}
+					}
+				}
+				catch (utmError)
+				{
+					resultLog = resultLog + "WARNING: UTM stamp failed on " + utmModule + " for BD ID " + bdUserId + ": " + utmError + "\n";
+				}
+			}
+		}
+		// -----------------------------------------
 	}
 	else
 	{

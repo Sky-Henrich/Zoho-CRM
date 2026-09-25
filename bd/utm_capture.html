@@ -1,0 +1,75 @@
+<!--
+  IGP UTM capture - paste once, site-wide, into BD's footer/custom-code area
+  so it runs on EVERY page of www.igopanama.com.
+
+  Why site-wide: the UTM links (sheet "IGP UTM Links - both arms") land on
+  /marketing-results, /business, /join-individual, /guides and
+  /find-a-business - not on the form pages. The ?utm_... values vanish as
+  soon as the visitor clicks to another page, so they are saved in a
+  first-party cookie on arrival and written into the form's hidden fields
+  (utm_source, utm_medium, utm_campaign, utm_content) when a form is shown
+  or submitted.
+
+  Attribution rule: last non-direct touch, kept 30 days. A new UTM link
+  replaces the stored values; plain visits (no utm_ in the URL) keep them.
+-->
+<script>
+(function () {
+  var KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content'];
+  var COOKIE = 'igp_utm';
+  var DAYS = 30;
+
+  function readCookie() {
+    var m = document.cookie.match(new RegExp('(?:^|; )' + COOKIE + '=([^;]*)'));
+    if (!m) { return null; }
+    try { return JSON.parse(decodeURIComponent(m[1])); } catch (e) { return null; }
+  }
+
+  function writeCookie(data) {
+    var exp = new Date(Date.now() + DAYS * 864e5).toUTCString();
+    document.cookie = COOKIE + '=' + encodeURIComponent(JSON.stringify(data)) +
+      '; expires=' + exp + '; path=/; SameSite=Lax';
+  }
+
+  // 1. Capture: a landing URL carrying utm_source overwrites the stored set.
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('utm_source')) {
+    var fresh = {};
+    KEYS.forEach(function (k) {
+      fresh[k] = (params.get(k) || '').trim().toLowerCase().slice(0, 100);
+    });
+    writeCookie(fresh);
+  }
+
+  var stored = readCookie();
+  if (!stored) { return; }
+
+  // 2. Fill: any input named utm_* that is still empty (the hidden fields
+  //    added to the BD forms). Never overwrites a value already set.
+  function fill(root) {
+    KEYS.forEach(function (k) {
+      var inputs = (root || document).querySelectorAll('input[name="' + k + '"]');
+      for (var i = 0; i < inputs.length; i++) {
+        if (!inputs[i].value && stored[k]) { inputs[i].value = stored[k]; }
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { fill(); });
+  } else {
+    fill();
+  }
+  // Lead forms open in modals / load via AJAX - fill again when they appear
+  // and one last time right before any form submits.
+  if (window.MutationObserver) {
+    var pending = false;
+    new MutationObserver(function () {
+      if (pending) { return; }
+      pending = true;
+      setTimeout(function () { pending = false; fill(); }, 200);
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  document.addEventListener('submit', function (e) { fill(e.target); }, true);
+})();
+</script>
