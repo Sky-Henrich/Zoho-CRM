@@ -631,6 +631,47 @@ try
 		{
 			bdLastName = "Unknown";
 		}
+		// ---- META_LEAD_SOURCE_KEEP PATCH (1 of 2) ----
+		// Meta lead ads reach Zoho through LeadChain as Leads with
+		// Lead_Source = "Meta Lead Ad" (and no BD_Member_ID yet). When that
+		// person later signs up on BD, the sync below matches the Lead by
+		// email/phone and writes Lead_Source = "IGP" over it. Snapshot here,
+		// BEFORE any write, whether an existing Lead/Contact for this person
+		// already came from Meta, so the value can be put back afterwards.
+		cameFromMeta = false;
+		for each  metaModule in {"Leads","Contacts"}
+		{
+			if(cameFromMeta == false)
+			{
+				try
+				{
+					metaMatches = zoho.crm.searchRecords(metaModule,"(BD_Member_ID:equals:" + bdUserId + ")");
+					if((metaMatches == null || metaMatches.size() == 0) && bdEmail != null && bdEmail != "")
+					{
+						metaMatches = zoho.crm.searchRecords(metaModule,"(Email:equals:" + bdEmail + ")");
+					}
+					if(metaMatches != null && metaMatches.size() > 0)
+					{
+						for each  metaRec in metaMatches
+						{
+							if(metaRec.get("Lead_Source") == "Meta Lead Ad")
+							{
+								cameFromMeta = true;
+							}
+						}
+					}
+				}
+				catch (metaSnapshotError)
+				{
+					resultLog = resultLog + "WARNING: Meta Lead_Source check failed on " + metaModule + " for BD ID " + bdUserId + ": " + metaSnapshotError + "\n";
+				}
+			}
+		}
+		if(cameFromMeta == true)
+		{
+			resultLog = resultLog + "Existing record from Meta Lead Ad found for BD ID " + bdUserId + " - Lead_Source will be kept as 'Meta Lead Ad'\n";
+		}
+		// -----------------------------------------
 		// ==================== VERIFIED_MEMBER_LIVE_API PATCH ====================
 		// The webhook body's "user[verified]" field parsed empty on a real
 		// payload that clearly contained it, root cause not pinned down.
@@ -2614,7 +2655,11 @@ try
 		// "Meta Lead Ad" is missing from a module's Lead_Source picklist,
 		// only this write fails - the UTM fields still save.
 		utmLeadSourceValue = "Meta Lead Ad";
-		if(bdUtmValues.size() > 0)
+		// ---- META_LEAD_SOURCE_KEEP PATCH (2 of 2) ----
+		// Also runs when the person originally came from a Meta lead ad
+		// (cameFromMeta), even with no UTM values, so "Meta Lead Ad" is
+		// restored on the Lead/Contact/Deal after the sync wrote "IGP".
+		if(bdUtmValues.size() > 0 || cameFromMeta == true)
 		{
 			utmUpdate = Map();
 			utmUpdate.put("UTM_Source",ifnull(bdUtmValues.get("utm_source"),""));
@@ -2636,7 +2681,7 @@ try
 							{
 								recordHasUtm = true;
 							}
-							if(recordHasUtm == false)
+							if(recordHasUtm == false && bdUtmValues.size() > 0)
 							{
 								utmResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),utmUpdate);
 								if(utmResp != null && utmResp.get("status") == "error")
@@ -2653,7 +2698,7 @@ try
 								}
 							}
 							// ---- UTM_LEAD_SOURCE PATCH: apply ----
-							if(recordHasUtm == true && utmModule != "Accounts")
+							if((recordHasUtm == true || cameFromMeta == true) && utmModule != "Accounts")
 							{
 								leadSourceResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),{"Lead_Source":utmLeadSourceValue});
 								if(leadSourceResp != null && leadSourceResp.get("status") == "error")
