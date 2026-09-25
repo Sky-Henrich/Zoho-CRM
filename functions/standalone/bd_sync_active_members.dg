@@ -2631,7 +2631,11 @@ try
 						for each  utmRec in utmMatches
 						{
 							existingUtmSource = utmRec.get("UTM_Source");
-							recordHasUtm = existingUtmSource != null && existingUtmSource.toString().trim() != "";
+							recordHasUtm = false;
+							if(existingUtmSource != null && existingUtmSource.toString().trim() != "")
+							{
+								recordHasUtm = true;
+							}
 							if(recordHasUtm == false)
 							{
 								utmResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),utmUpdate);
