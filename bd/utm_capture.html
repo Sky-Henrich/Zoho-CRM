@@ -8,7 +8,9 @@
   soon as the visitor clicks to another page, so they are saved in a
   first-party cookie on arrival and written into the form's hidden fields
   (utm_source, utm_medium, utm_campaign, utm_content) when a form is shown
-  or submitted.
+  or submitted. BD pre-fills Hidden Fields with their label ("UTM Source"),
+  so those placeholder values are replaced, or cleared when there is no
+  stored UTM.
 
   Attribution rule: last non-direct touch, kept 30 days. A new UTM link
   replaces the stored values; plain visits (no utm_ in the URL) keep them.
@@ -41,16 +43,23 @@
     writeCookie(fresh);
   }
 
-  var stored = readCookie();
-  if (!stored) { return; }
+  var stored = readCookie() || {};
 
-  // 2. Fill: any input named utm_* that is still empty (the hidden fields
-  //    added to the BD forms). Never overwrites a value already set.
+  // BD pre-fills a Hidden Field with its Field Label (e.g. "UTM Source"),
+  // so a value that is just the field's own name/label counts as empty.
+  function isPlaceholder(v) {
+    return !v || /^utm[ _-]?(source|medium|campaign|content)$/i.test(v.trim());
+  }
+
+  // 2. Fill: any input named utm_* (the hidden fields added to the BD
+  //    forms). Empty or placeholder values get the stored value - or are
+  //    cleared when there is none, so a label never reaches the CRM.
+  //    A real value already set is never overwritten.
   function fill(root) {
     KEYS.forEach(function (k) {
       var inputs = (root || document).querySelectorAll('input[name="' + k + '"]');
       for (var i = 0; i < inputs.length; i++) {
-        if (!inputs[i].value && stored[k]) { inputs[i].value = stored[k]; }
+        if (isPlaceholder(inputs[i].value)) { inputs[i].value = stored[k] || ''; }
       }
     });
   }

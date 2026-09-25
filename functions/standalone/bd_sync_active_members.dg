@@ -149,9 +149,13 @@ if(body != null && body != "")
 			else if(fieldKey.contains("utm_"))
 			{
 				utmKey = fieldKey.replaceAll("^(user|member)\\[","").replaceAll("\\]$","").toLowerCase();
-				if((utmKey == "utm_source" || utmKey == "utm_medium" || utmKey == "utm_campaign" || utmKey == "utm_content") && fieldValue != "")
+				utmDecoded = zoho.encryption.urlDecode(fieldValue.replaceAll("\\+"," ")).trim();
+				// BD pre-fills Hidden Fields with their label ("UTM Source") -
+				// that placeholder is not a real value, so it is ignored.
+				utmPlaceholder = utmDecoded.toLowerCase().replaceAll("[ _-]","");
+				if((utmKey == "utm_source" || utmKey == "utm_medium" || utmKey == "utm_campaign" || utmKey == "utm_content") && utmDecoded != "" && utmPlaceholder != utmKey.replaceAll("_",""))
 				{
-					bdUtmValues.put(utmKey,zoho.encryption.urlDecode(fieldValue.replaceAll("\\+"," ")).trim());
+					bdUtmValues.put(utmKey,utmDecoded);
 				}
 			}
 			// -----------------------------------------
@@ -602,7 +606,7 @@ try
 			if(bdUtmValues.get(utmKey) == null)
 			{
 				utmApiValue = u.get(utmKey);
-				if(utmApiValue != null && utmApiValue.toString().trim() != "")
+				if(utmApiValue != null && utmApiValue.toString().trim() != "" && utmApiValue.toString().toLowerCase().replaceAll("[ _-]","") != utmKey.replaceAll("_",""))
 				{
 					bdUtmValues.put(utmKey,utmApiValue.toString().trim());
 				}
