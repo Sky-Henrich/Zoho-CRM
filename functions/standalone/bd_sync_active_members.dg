@@ -631,17 +631,17 @@ try
 		{
 			bdLastName = "Unknown";
 		}
-		// ---- META_LEAD_SOURCE_KEEP PATCH (1 of 2) ----
-		// Meta lead ads reach Zoho through LeadChain as Leads with
-		// Lead_Source = "Meta Lead Ad" (and no BD_Member_ID yet). When that
-		// person later signs up on BD, the sync below matches the Lead by
-		// email/phone and writes Lead_Source = "IGP" over it. Snapshot here,
-		// BEFORE any write, whether an existing Lead/Contact for this person
-		// already came from Meta, so the value can be put back afterwards.
-		cameFromMeta = false;
+		// ---- LEAD_SOURCE_KEEP PATCH (1 of 2) ----
+		// Other channels create records before a BD signup: LeadChain (Meta
+		// ads) -> Lead_Source "Meta Lead Ad", SalesIQ (website chat) ->
+		// "SalesIQ". When that person later signs up on BD, the sync below
+		// matches the record by email/phone and writes "IGP" over it.
+		// Snapshot here, BEFORE any write, any existing Lead_Source that is
+		// not "IGP", so it can be put back afterwards.
+		existingLeadSource = "";
 		for each  metaModule in {"Leads","Contacts"}
 		{
-			if(cameFromMeta == false)
+			if(existingLeadSource == "")
 			{
 				try
 				{
@@ -654,22 +654,23 @@ try
 					{
 						for each  metaRec in metaMatches
 						{
-							if(metaRec.get("Lead_Source") == "Meta Lead Ad")
+							recLeadSource = ifnull(metaRec.get("Lead_Source"),"").toString().trim();
+							if(existingLeadSource == "" && recLeadSource != "" && recLeadSource != "IGP" && recLeadSource != "-None-")
 							{
-								cameFromMeta = true;
+								existingLeadSource = recLeadSource;
 							}
 						}
 					}
 				}
 				catch (metaSnapshotError)
 				{
-					resultLog = resultLog + "WARNING: Meta Lead_Source check failed on " + metaModule + " for BD ID " + bdUserId + ": " + metaSnapshotError + "\n";
+					resultLog = resultLog + "WARNING: Lead_Source check failed on " + metaModule + " for BD ID " + bdUserId + ": " + metaSnapshotError + "\n";
 				}
 			}
 		}
-		if(cameFromMeta == true)
+		if(existingLeadSource != "")
 		{
-			resultLog = resultLog + "Existing record from Meta Lead Ad found for BD ID " + bdUserId + " - Lead_Source will be kept as 'Meta Lead Ad'\n";
+			resultLog = resultLog + "Existing Lead_Source '" + existingLeadSource + "' found for BD ID " + bdUserId + " - it will be kept (not overwritten with 'IGP')\n";
 		}
 		// -----------------------------------------
 		// ==================== VERIFIED_MEMBER_LIVE_API PATCH ====================
@@ -2655,11 +2656,12 @@ try
 		// "Meta Lead Ad" is missing from a module's Lead_Source picklist,
 		// only this write fails - the UTM fields still save.
 		utmLeadSourceValue = "Meta Lead Ad";
-		// ---- META_LEAD_SOURCE_KEEP PATCH (2 of 2) ----
-		// Also runs when the person originally came from a Meta lead ad
-		// (cameFromMeta), even with no UTM values, so "Meta Lead Ad" is
-		// restored on the Lead/Contact/Deal after the sync wrote "IGP".
-		if(bdUtmValues.size() > 0 || cameFromMeta == true)
+		// ---- LEAD_SOURCE_KEEP PATCH (2 of 2) ----
+		// Also runs when the person already had a non-IGP Lead_Source
+		// (existingLeadSource), even with no UTM values. That original
+		// source wins over both "IGP" and the UTM rule, and is restored on
+		// the Lead/Contact/Deal after the sync wrote "IGP".
+		if(bdUtmValues.size() > 0 || existingLeadSource != "")
 		{
 			utmUpdate = Map();
 			utmUpdate.put("UTM_Source",ifnull(bdUtmValues.get("utm_source"),""));
@@ -2698,16 +2700,25 @@ try
 								}
 							}
 							// ---- UTM_LEAD_SOURCE PATCH: apply ----
-							if((recordHasUtm == true || cameFromMeta == true) && utmModule != "Accounts")
+							targetLeadSource = "";
+							if(existingLeadSource != "")
 							{
-								leadSourceResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),{"Lead_Source":utmLeadSourceValue});
+								targetLeadSource = existingLeadSource;
+							}
+							else if(recordHasUtm == true)
+							{
+								targetLeadSource = utmLeadSourceValue;
+							}
+							if(targetLeadSource != "" && utmModule != "Accounts")
+							{
+								leadSourceResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),{"Lead_Source":targetLeadSource});
 								if(leadSourceResp != null && leadSourceResp.get("status") == "error")
 								{
-									resultLog = resultLog + "WARNING: Lead_Source '" + utmLeadSourceValue + "' not saved on " + utmModule + " for BD ID " + bdUserId + " (is it in this module's Lead Source picklist?) - Zoho response: " + leadSourceResp + "\n";
+									resultLog = resultLog + "WARNING: Lead_Source '" + targetLeadSource + "' not saved on " + utmModule + " for BD ID " + bdUserId + " (is it in this module's Lead Source picklist?) - Zoho response: " + leadSourceResp + "\n";
 								}
 								else
 								{
-									resultLog = resultLog + "Lead_Source set to '" + utmLeadSourceValue + "' on " + utmModule + " for BD ID " + bdUserId + "\n";
+									resultLog = resultLog + "Lead_Source set to '" + targetLeadSource + "' on " + utmModule + " for BD ID " + bdUserId + "\n";
 								}
 							}
 							// -----------------------------------------
