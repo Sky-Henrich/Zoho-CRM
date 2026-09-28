@@ -633,7 +633,7 @@ try
 		}
 		// ---- LEAD_SOURCE_KEEP PATCH (1 of 2) ----
 		// Other channels create records before a BD signup: LeadChain (Meta
-		// ads) -> Lead_Source "Meta Lead Ad", SalesIQ (website chat) ->
+		// ads) -> Lead_Source "Meta Ads", SalesIQ (website chat) ->
 		// "SalesIQ". When that person later signs up on BD, the sync below
 		// matches the record by email/phone and writes "IGP" over it.
 		// Snapshot here, BEFORE any write, any existing Lead_Source that is
@@ -2649,13 +2649,13 @@ try
 		// channel that originally brought the member in.
 		//
 		// ---- UTM_LEAD_SOURCE PATCH ----
-		// Any record carrying UTM values gets Lead_Source = "Meta Lead Ad"
+		// Any record carrying UTM values gets Lead_Source = "Meta Ads"
 		// (Accounts have no Lead_Source). This runs on EVERY webhook, after
 		// the main sync above has re-written Lead_Source = "IGP", so the
 		// value doesn't flip back. It is a separate call so that, if
-		// "Meta Lead Ad" is missing from a module's Lead_Source picklist,
+		// "Meta Ads" is missing from a module's Lead_Source picklist,
 		// only this write fails - the UTM fields still save.
-		utmLeadSourceValue = "Meta Lead Ad";
+		utmLeadSourceValue = "Meta Ads";
 		// ---- LEAD_SOURCE_KEEP PATCH (2 of 2) ----
 		// Also runs when the person already had a non-IGP Lead_Source
 		// (existingLeadSource), even with no UTM values. That original
