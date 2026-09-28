@@ -1255,17 +1255,26 @@ try
 		// condition.
 		else if((userActive == 2 || userActive == "2") && (isSalesOutreachListingPlan == true || transactionIsPaid == true && isFreeListingPlan == false))
 		{
-			// ==================== CLOSED_WON_CRITERIA PATCH (2 of 2) ====================
-			// Closed Won requires ALL three: a real amount paid (>0), the
-			// Current_Plan being one of the ten Verificado/Impulso tiers, and
-			// the Deal's Trial_Plan field being empty (checked further below,
-			// once an existing Deal's current Trial_Plan value is available -
-			// a brand-new Deal has no prior Trial_Plan so trivially satisfies
-			// this one). Sales Outreach is the default/fallback whenever any
-			// of these don't hold, same as it already is for the five free
-			// listing plans - it's the general "still in the funnel, not yet
-			// won" stage now, not just the free-listing-specific one.
-			targetStage = "Sales Outreach";
+			// ==================== PLAN_LEVEL_STAGES PATCH ====================
+			// Deal Stage = the member's BD plan level (Sarah, 12 Sep 2026), not
+			// a sales stage. There is no Sales Outreach / Closed Won any more;
+			// a Deal is an active client and stays open. Pipeline "Standard":
+			//   Free Trial  - Verificado/Impulso plan whose BD Next Payment
+			//                 (BD_Due_Date) is exactly 3 months after its BD
+			//                 Created date (Subscription_Start_Date)
+			//   Listing     - any "X Listing" plan
+			//   Verificado  - any "X Verificado" plan
+			//   Impulso     - any "X Impulso" plan
+			// A plan change in BD moves the Deal to the matching stage.
+			targetStage = "Listing";
+			if(mappedPlan != null && mappedPlan.contains("Impulso"))
+			{
+				targetStage = "Impulso";
+			}
+			else if(mappedPlan != null && mappedPlan.contains("Verificado"))
+			{
+				targetStage = "Verificado";
+			}
 			// ---- CLAIMABLE_CONVERSION_GATE PATCH: default ----
 			// Defined here, at the top of the whole branch, so every path
 			// through it (existing Deal found, no Lead found, direct
@@ -1278,18 +1287,13 @@ try
 			// exists - wrong when conversion was correctly skipped).
 			canConvertLead = true;
 			// -----------------------------------------
-			if(isSalesOutreachListingPlan == false && safeAmount != null && safeAmount > 0 && isVerificadoOrImpulsoPlan == true)
-			{
-				targetStage = "Closed Won";
-			}
 			// ---- FREE_TRIAL_STAGE PATCH ----
-			// A $0 subscription whose BD Next Payment (BD_Due_Date) is exactly
-			// 3 months after its BD Created date (Subscription_Start_Date) is
-			// the free-trial offer - move the Deal to "Free Trial" instead of
-			// Sales Outreach. Listing plans are excluded (they never carry
-			// these dates). Compared as yyyy-MM-dd strings so no time
-			// component can cause a mismatch.
-			else if(isSalesOutreachListingPlan == false && (safeAmount == null || safeAmount == 0) && subscriptionStartDate != null && bdDueDate != null)
+			// The 3-month free plan: BD_Due_Date exactly 3 months after
+			// Subscription_Start_Date on a Verificado/Impulso plan -> Free
+			// Trial, whatever the amount (the amount is what they will pay
+			// once the free months end). Compared as yyyy-MM-dd strings so no
+			// time component can cause a mismatch.
+			if(isVerificadoOrImpulsoPlan == true && subscriptionStartDate != null && bdDueDate != null)
 			{
 				try
 				{
@@ -1297,7 +1301,7 @@ try
 					if(bdDueDate.toString("yyyy-MM-dd") == trialEndExpected)
 					{
 						targetStage = "Free Trial";
-						resultLog = resultLog + "Free Trial detected (Amount 0, BD_Due_Date " + trialEndExpected + " = Subscription_Start_Date + 3 months) for BD ID " + bdUserId + "\n";
+						resultLog = resultLog + "Free Trial detected (BD_Due_Date " + trialEndExpected + " = Subscription_Start_Date + 3 months) for BD ID " + bdUserId + "\n";
 					}
 				}
 				catch (freeTrialError)
@@ -1305,6 +1309,7 @@ try
 					resultLog = resultLog + "WARNING: Free Trial date check failed for BD ID " + bdUserId + ": " + freeTrialError + "\n";
 				}
 			}
+			resultLog = resultLog + "Deal Stage target for BD ID " + bdUserId + ": " + targetStage + " (plan " + mappedPlan + ")\n";
 			// ==================================================================================
 			try
 			{
