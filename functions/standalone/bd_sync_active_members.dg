@@ -1902,16 +1902,16 @@ try
 					{
 						leadRecord = leadMatches.get(0);
 						leadId = leadRecord.get("id");
-						// ---- CLAIMABLE_CONVERSION_GATE PATCH (4 of 4) ----
-						// A lead that just moved off Claimable onto a Listing
-						// plan must ALSO be Verified before converting to a
-						// Deal - both conditions required, matching neither
-						// being sufficient alone. Leads that were never
-						// Claimable (a brand-new public signup) are
-						// unaffected and keep converting as soon as they're
-						// on a Listing plan, same as before.
+						// ---- VERIFIED_CONVERSION_TRIGGER PATCH ----
+						// (Sarah, 12 Sep 2026) A Lead already in Zoho moves to
+						// Deals only when BD shows the member Active AND
+						// Verified - for every plan level (Listing, Verificado,
+						// Impulso), not just Leads coming from Claimable. Until
+						// then it stays a Lead, tagged with the latest plan.
+						// A direct BD signup with no Lead in Zoho is not gated:
+						// it skips the Lead stage and goes straight to Deals.
 						canConvertLead = true;
-						if(wasClaimable == true && isSalesOutreachListingPlan == true && mappedVerifiedMember != "YES - Verified")
+						if(mappedVerifiedMember != "YES - Verified")
 						{
 							canConvertLead = false;
 						}
@@ -2225,7 +2225,7 @@ try
 						}
 						else
 						{
-							resultLog = resultLog + "Lead not converted to Deal for BD ID " + bdUserId + " - was Claimable and is now on a Listing plan, but Verified_Member is not YES yet\n";
+							resultLog = resultLog + "Lead not converted to Deal for BD ID " + bdUserId + " - existing Lead is on plan " + mappedPlan + " but Verified_Member is not YES yet (Lead converts once BD marks the member Verified)\n";
 						}
 					}
 					else
