@@ -605,15 +605,18 @@ try
 					// ---- TRANSACTION_START_DATE PATCH (2 of 3) ----
 					// Subscription_Start_Date = BD Transactions "Date": the
 					// earliest PAID invoice of this Active subscription (its
-					// first payment). Falls back to the subscription's
-					// Created date when no paid invoice is found.
+					// first payment). If none is linked to the subscription
+					// (e.g. the only payment is a "Lead #" purchase), the
+					// member's most recent paid transaction is used. Last
+					// resort: the subscription's Created date.
 					firstPaidDate = null;
+					latestAnyPaidDate = null;
 					activeSubId = activeSubDetails.get("id") + "";
 					for each  payTx in transactionsList
 					{
 						payTxSub = payTx.get("subscription_details");
 						payTxInvoice = payTx.get("invoice_details");
-						if(payTxSub != null && payTxInvoice != null && payTxSub.get("id") + "" == activeSubId && ifnull(payTxInvoice.get("status"),"").toString().equalsIgnoreCase("Paid"))
+						if(payTxInvoice != null && ifnull(payTxInvoice.get("status"),"").toString().equalsIgnoreCase("Paid"))
 						{
 							payDateRaw = ifnull(payTxInvoice.get("datepaid"),"").toString().trim();
 							if(payDateRaw == "" || payDateRaw.startsWith("0000"))
@@ -623,7 +626,11 @@ try
 							if(payDateRaw != "" && !payDateRaw.startsWith("0000") && payDateRaw.length() >= 10)
 							{
 								payDate = payDateRaw.substring(0,10).toDate("yyyy-MM-dd");
-								if(firstPaidDate == null || payDate < firstPaidDate)
+								if(latestAnyPaidDate == null || payDate > latestAnyPaidDate)
+								{
+									latestAnyPaidDate = payDate;
+								}
+								if(payTxSub != null && payTxSub.get("id") + "" == activeSubId && (firstPaidDate == null || payDate < firstPaidDate))
 								{
 									firstPaidDate = payDate;
 								}
@@ -633,6 +640,11 @@ try
 					if(firstPaidDate != null)
 					{
 						subscriptionStartDate = firstPaidDate;
+					}
+					else if(latestAnyPaidDate != null)
+					{
+						subscriptionStartDate = latestAnyPaidDate;
+						resultLog = resultLog + "No paid invoice linked to order " + activeSubId + " - Subscription_Start_Date uses the member's latest paid transaction (" + latestAnyPaidDate + ") for BD ID " + bdUserId + "\n";
 					}
 					else
 					{
