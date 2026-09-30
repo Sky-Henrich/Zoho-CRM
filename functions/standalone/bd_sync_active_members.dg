@@ -268,6 +268,11 @@ if(bdNextDueDateBracket != null && bdNextDueDateBracket != "" && bdNextDueDateBr
 	}
 }
 subscriptionStartDate = null;
+// ---- TRANSACTION_START_DATE PATCH (1 of 3) ----
+// BD "Created" date of the Active subscription. Subscription_Start_Date now
+// comes from the Transactions "Date" instead, but the 3-month Free Trial
+// check still measures from Created -> Next Payment.
+trialAnchorDate = null;
 if(bdSignupDateRaw != null && bdSignupDateRaw.length() == 14)
 {
 	try
@@ -595,6 +600,43 @@ try
 					if(activeSubRegDate != null)
 					{
 						subscriptionStartDate = activeSubRegDate;
+						trialAnchorDate = activeSubRegDate;
+					}
+					// ---- TRANSACTION_START_DATE PATCH (2 of 3) ----
+					// Subscription_Start_Date = BD Transactions "Date": the
+					// earliest PAID invoice of this Active subscription (its
+					// first payment). Falls back to the subscription's
+					// Created date when no paid invoice is found.
+					firstPaidDate = null;
+					activeSubId = activeSubDetails.get("id") + "";
+					for each  payTx in transactionsList
+					{
+						payTxSub = payTx.get("subscription_details");
+						payTxInvoice = payTx.get("invoice_details");
+						if(payTxSub != null && payTxInvoice != null && payTxSub.get("id") + "" == activeSubId && ifnull(payTxInvoice.get("status"),"").toString().equalsIgnoreCase("Paid"))
+						{
+							payDateRaw = ifnull(payTxInvoice.get("datepaid"),"").toString().trim();
+							if(payDateRaw == "" || payDateRaw.startsWith("0000"))
+							{
+								payDateRaw = ifnull(payTxInvoice.get("date"),"").toString().trim();
+							}
+							if(payDateRaw != "" && !payDateRaw.startsWith("0000") && payDateRaw.length() >= 10)
+							{
+								payDate = payDateRaw.substring(0,10).toDate("yyyy-MM-dd");
+								if(firstPaidDate == null || payDate < firstPaidDate)
+								{
+									firstPaidDate = payDate;
+								}
+							}
+						}
+					}
+					if(firstPaidDate != null)
+					{
+						subscriptionStartDate = firstPaidDate;
+					}
+					else
+					{
+						resultLog = resultLog + "No paid transaction date found for order " + activeSubId + " (BD ID " + bdUserId + ") - Subscription_Start_Date uses the subscription Created date\n";
 					}
 					// ---- PAYMENT_OPTION PATCH (2 of 2) + SUBSCRIPTION_AMOUNT PATCH (1 of 2) ----
 					// BD "Subscription" column: amount + billing cycle
@@ -1346,11 +1388,17 @@ try
 			{
 				try
 				{
-					trialEndExpected = subscriptionStartDate.addMonth(3).toString("yyyy-MM-dd");
+					// ---- TRANSACTION_START_DATE PATCH (3 of 3) ----
+					trialFrom = subscriptionStartDate;
+					if(trialAnchorDate != null)
+					{
+						trialFrom = trialAnchorDate;
+					}
+					trialEndExpected = trialFrom.addMonth(3).toString("yyyy-MM-dd");
 					if(bdDueDate.toString("yyyy-MM-dd") == trialEndExpected)
 					{
 						targetStage = "Free Trial";
-						resultLog = resultLog + "Free Trial detected (BD_Due_Date " + trialEndExpected + " = Subscription_Start_Date + 3 months) for BD ID " + bdUserId + "\n";
+						resultLog = resultLog + "Free Trial detected (BD_Due_Date " + trialEndExpected + " = BD Created date + 3 months) for BD ID " + bdUserId + "\n";
 					}
 				}
 				catch (freeTrialError)
