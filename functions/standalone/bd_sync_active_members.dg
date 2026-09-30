@@ -573,6 +573,7 @@ try
 		activeSubRegDate = null;
 		activeSubAmountRaw = null;
 		activeSubCycleRaw = "";
+		txAmountRaw = null;
 		if(transactionsList != null && transactionsList != false)
 		{
 			try
@@ -609,8 +610,11 @@ try
 					// (e.g. the only payment is a "Lead #" purchase), the
 					// member's most recent paid transaction is used. Last
 					// resort: the subscription's Created date.
+					// Amount = the "Amount" of that same transaction row.
 					firstPaidDate = null;
 					latestAnyPaidDate = null;
+					firstPaidAmount = null;
+					latestAnyPaidAmount = null;
 					activeSubId = activeSubDetails.get("id") + "";
 					for each  payTx in transactionsList
 					{
@@ -626,13 +630,24 @@ try
 							if(payDateRaw != "" && !payDateRaw.startsWith("0000") && payDateRaw.length() >= 10)
 							{
 								payDate = payDateRaw.substring(0,10).toDate("yyyy-MM-dd");
+								payAmount = payTxInvoice.get("total");
+								if(payAmount == null || payAmount.toString().trim() == "")
+								{
+									payAmount = payTxInvoice.get("amount");
+								}
+								if(payAmount == null || payAmount.toString().trim() == "")
+								{
+									payAmount = payTxInvoice.get("subtotal");
+								}
 								if(latestAnyPaidDate == null || payDate > latestAnyPaidDate)
 								{
 									latestAnyPaidDate = payDate;
+									latestAnyPaidAmount = payAmount;
 								}
 								if(payTxSub != null && payTxSub.get("id") + "" == activeSubId && (firstPaidDate == null || payDate < firstPaidDate))
 								{
 									firstPaidDate = payDate;
+									firstPaidAmount = payAmount;
 								}
 							}
 						}
@@ -640,10 +655,12 @@ try
 					if(firstPaidDate != null)
 					{
 						subscriptionStartDate = firstPaidDate;
+						txAmountRaw = firstPaidAmount;
 					}
 					else if(latestAnyPaidDate != null)
 					{
 						subscriptionStartDate = latestAnyPaidDate;
+						txAmountRaw = latestAnyPaidAmount;
 						resultLog = resultLog + "No paid invoice linked to order " + activeSubId + " - Subscription_Start_Date uses the member's latest paid transaction (" + latestAnyPaidDate + ") for BD ID " + bdUserId + "\n";
 					}
 					else
@@ -668,7 +685,7 @@ try
 					{
 						bdDueDate = activeNextDueRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
 					}
-					resultLog = resultLog + "Active BD subscription (order " + activeSubDetails.get("id") + ") synced: Subscription_Start_Date=" + subscriptionStartDate + " BD_Due_Date=" + bdDueDate + " Amount=" + activeSubAmountRaw + " Payment_Option=" + paymentOptionValue + " for BD ID " + bdUserId + "\n";
+					resultLog = resultLog + "Active BD subscription (order " + activeSubDetails.get("id") + ") synced: Subscription_Start_Date=" + subscriptionStartDate + " BD_Due_Date=" + bdDueDate + " Amount=" + ifnull(txAmountRaw,activeSubAmountRaw) + " Payment_Option=" + paymentOptionValue + " for BD ID " + bdUserId + "\n";
 				}
 				else
 				{
@@ -951,11 +968,16 @@ try
 			}
 		}
 		// ---- SUBSCRIPTION_AMOUNT PATCH (2 of 2) ----
-		// Amount = what the member's Active BD subscription actually bills
-		// (the "Subscription" column, e.g. 15.00/Monthly, 0.00 for a free
-		// plan), not the plan's list price. Exception: on a plan purchase
-		// webhook a positive payload amount is kept, since BD's API can lag
-		// the purchase by a moment.
+		// Amount = BD Transactions "Amount" of the paid transaction that set
+		// Subscription_Start_Date. If there is none, the Active
+		// subscription's amount ("Subscription" column); the plan list price
+		// is only the last resort. Exception: on a plan purchase webhook a
+		// positive payload amount is kept, since BD's API can lag the
+		// purchase by a moment.
+		if(txAmountRaw != null && txAmountRaw.toString().trim() != "")
+		{
+			activeSubAmountRaw = txAmountRaw;
+		}
 		if(activeSubAmountRaw != null && activeSubAmountRaw.toString().trim() != "")
 		{
 			keepPayloadAmount = false;
