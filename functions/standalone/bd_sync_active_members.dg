@@ -322,14 +322,20 @@ if(subscriptionStartDateFromWebhook == null && bdIsPlanPurchase && bdUpgradeTime
 	}
 }
 // -----------------------------------------
+// ---- PAYMENT_OPTION PATCH (1 of 2) ----
+// BD writes the cycle as "Monthly" / "Annually" on subscriptions and
+// "monthly" / "yearly" on member records - all map to the CRM picklist.
+// Recomputed below from the member's Active subscription (2 of 2), which
+// wins over this webhook-body value.
 paymentOptionValue = "";
 if(bdMemberTypeRaw != null)
 {
-	if(bdMemberTypeRaw.toLowerCase() == "yearly")
+	cycleLower = bdMemberTypeRaw.toString().trim().toLowerCase();
+	if(cycleLower == "yearly" || cycleLower == "annually" || cycleLower == "annual" || cycleLower == "year")
 	{
 		paymentOptionValue = "Annually";
 	}
-	else if(bdMemberTypeRaw.toLowerCase() == "monthly")
+	else if(cycleLower == "monthly" || cycleLower == "month")
 	{
 		paymentOptionValue = "Monthly";
 	}
@@ -551,6 +557,8 @@ try
 		// status (domainstatus) is "Active" and sync:
 		//   BD "Created"      (regdate)     -> Subscription_Start_Date
 		//   BD "Next Payment" (nextduedate) -> BD_Due_Date
+		//   BD "Subscription" amount         -> Amount
+		//   BD "Subscription" billing cycle  -> Payment_Option (Monthly/Annually)
 		// This overrides the webhook values above: the subscription_updated
 		// webhook's subscription[nextduedate] can be the pre-edit value
 		// (e.g. 2026-10-24 posted while BD shows 24/12/2026). If several
@@ -558,6 +566,8 @@ try
 		// Active (or the API omits these fields), the fallbacks above stand.
 		activeSubDetails = null;
 		activeSubRegDate = null;
+		activeSubAmountRaw = null;
+		activeSubCycleRaw = "";
 		if(transactionsList != null && transactionsList != false)
 		{
 			try
@@ -586,12 +596,25 @@ try
 					{
 						subscriptionStartDate = activeSubRegDate;
 					}
+					// ---- PAYMENT_OPTION PATCH (2 of 2) + SUBSCRIPTION_AMOUNT PATCH (1 of 2) ----
+					// BD "Subscription" column: amount + billing cycle
+					// (e.g. "15.00/Monthly", "0.00/Annually").
+					activeSubAmountRaw = activeSubDetails.get("amount");
+					activeSubCycleRaw = ifnull(activeSubDetails.get("billingcycle"),"").toString().trim().toLowerCase();
+					if(activeSubCycleRaw == "yearly" || activeSubCycleRaw == "annually" || activeSubCycleRaw == "annual" || activeSubCycleRaw == "year")
+					{
+						paymentOptionValue = "Annually";
+					}
+					else if(activeSubCycleRaw == "monthly" || activeSubCycleRaw == "month")
+					{
+						paymentOptionValue = "Monthly";
+					}
 					activeNextDueRaw = activeSubDetails.get("nextduedate");
 					if(activeNextDueRaw != null && activeNextDueRaw != "" && activeNextDueRaw != "0000-00-00")
 					{
 						bdDueDate = activeNextDueRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
 					}
-					resultLog = resultLog + "Active BD subscription (order " + activeSubDetails.get("id") + ") synced: Subscription_Start_Date=" + subscriptionStartDate + " BD_Due_Date=" + bdDueDate + " for BD ID " + bdUserId + "\n";
+					resultLog = resultLog + "Active BD subscription (order " + activeSubDetails.get("id") + ") synced: Subscription_Start_Date=" + subscriptionStartDate + " BD_Due_Date=" + bdDueDate + " Amount=" + activeSubAmountRaw + " Payment_Option=" + paymentOptionValue + " for BD ID " + bdUserId + "\n";
 				}
 				else
 				{
@@ -873,6 +896,32 @@ try
 				}
 			}
 		}
+		// ---- SUBSCRIPTION_AMOUNT PATCH (2 of 2) ----
+		// Amount = what the member's Active BD subscription actually bills
+		// (the "Subscription" column, e.g. 15.00/Monthly, 0.00 for a free
+		// plan), not the plan's list price. Exception: on a plan purchase
+		// webhook a positive payload amount is kept, since BD's API can lag
+		// the purchase by a moment.
+		if(activeSubAmountRaw != null && activeSubAmountRaw.toString().trim() != "")
+		{
+			keepPayloadAmount = false;
+			if(bdIsPlanPurchase == true && safeAmount != null && safeAmount > 0 && bdAmountRaw != null && bdAmountRaw != "")
+			{
+				keepPayloadAmount = true;
+			}
+			if(keepPayloadAmount == false)
+			{
+				try
+				{
+					safeAmount = activeSubAmountRaw.toString().trim().replaceAll("[^0-9.]","").toDecimal();
+				}
+				catch (subAmountError)
+				{
+					resultLog = resultLog + "WARNING: could not parse subscription amount '" + activeSubAmountRaw + "' for BD ID " + bdUserId + "\n";
+				}
+			}
+		}
+		// -----------------------------------------
 		mappedPlan = "";
 		topCategoryValue = "";
 		if(rawPlan != null)
