@@ -2732,8 +2732,21 @@ try
 						leadUpdate.put("Verified_Member",mappedVerifiedMember);
 					}
 					// -----------------------------------------
-					zoho.crm.updateRecord("Leads",leadId,leadUpdate);
-					resultLog = resultLog + "Existing Lead updated for free listing BD ID " + bdUserId + "\n";
+					// ---- FREE_LISTING_LEAD_LOG PATCH ----
+					// Name the Lead that was matched (and how) and report a
+					// rejected update, so a match on a shared email/phone/
+					// company is visible instead of looking like "nothing
+					// happened".
+					matchedLead = leadMatches.get(0);
+					leadUpdateResp = zoho.crm.updateRecord("Leads",leadId,leadUpdate);
+					if(leadUpdateResp != null && leadUpdateResp.get("status") == "error")
+					{
+						resultLog = resultLog + "WARNING: Lead update FAILED for free listing BD ID " + bdUserId + " (Lead " + leadId + ") - Zoho response: " + leadUpdateResp + "\n";
+					}
+					else
+					{
+						resultLog = resultLog + "Existing Lead updated for free listing BD ID " + bdUserId + ": Lead ID " + leadId + " '" + ifnull(matchedLead.get("Full_Name"),"") + "' (Company '" + ifnull(matchedLead.get("Company"),"") + "', Email '" + ifnull(matchedLead.get("Email"),"") + "', previous BD_Member_ID '" + ifnull(matchedLead.get("BD_Member_ID"),"") + "')\n";
+					}
 				}
 				else
 				{
@@ -2779,7 +2792,14 @@ try
 					}
 					// -----------------------------------------
 					newLeadResp = zoho.crm.createRecord("Leads",leadCreate);
-					resultLog = resultLog + "New Lead created as New Inquiry for free listing BD ID " + bdUserId + "\n";
+					if(newLeadResp != null && newLeadResp.get("id") != null)
+					{
+						resultLog = resultLog + "New Lead created as New Inquiry for free listing BD ID " + bdUserId + ": Lead ID " + newLeadResp.get("id") + "\n";
+					}
+					else
+					{
+						resultLog = resultLog + "WARNING: Lead create FAILED for free listing BD ID " + bdUserId + " - Zoho response: " + newLeadResp + "\n";
+					}
 				}
 			}
 			catch (leadError)
