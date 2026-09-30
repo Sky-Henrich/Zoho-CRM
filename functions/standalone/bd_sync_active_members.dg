@@ -1108,6 +1108,23 @@ try
 		// they never go into the Leads module long-term. Individual ->
 		// Contacts only. Community -> Accounts + Contacts.
 		// ---------------------------------------------------------------
+		// ---- LISTING_VERIFIED_GATE PATCH ----
+		// A free "X Listing" member stays in Leads until BD marks it
+		// Verified - also when it signed up directly in BD with no Lead in
+		// Zoho yet. Once Verified, the next webhook converts that Lead to a
+		// Deal at stage Listing. A Deal that already exists for this BD ID
+		// keeps being updated as a Deal (never pushed back to Leads).
+		listingAwaitingVerification = false;
+		if(isSalesOutreachListingPlan == true && mappedVerifiedMember != "YES - Verified")
+		{
+			existingDealForMember = zoho.crm.searchRecords("Deals","(BD_Member_ID:equals:" + bdUserId + ")");
+			if(existingDealForMember == null || existingDealForMember.size() == 0)
+			{
+				listingAwaitingVerification = true;
+				resultLog = resultLog + "Listing member BD ID " + bdUserId + " is not Verified yet - kept in Leads until BD marks it Verified\n";
+			}
+		}
+		// -----------------------------------------
 		if(topCategoryValue == "Individual" || topCategoryValue == "Community")
 		{
 			try
@@ -1378,7 +1395,7 @@ try
 		// path below. A true paid, non-listing plan still qualifies exactly
 		// as before via the original transactionIsPaid/isFreeListingPlan
 		// condition.
-		else if((userActive == 2 || userActive == "2") && (isSalesOutreachListingPlan == true || transactionIsPaid == true && isFreeListingPlan == false))
+		else if((userActive == 2 || userActive == "2") && listingAwaitingVerification == false && (isSalesOutreachListingPlan == true || transactionIsPaid == true && isFreeListingPlan == false))
 		{
 			// ==================== PLAN_LEVEL_STAGES PATCH ====================
 			// Deal Stage = the member's BD plan level (Sarah, 12 Sep 2026), not
