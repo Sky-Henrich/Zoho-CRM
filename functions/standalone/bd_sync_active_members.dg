@@ -764,7 +764,7 @@ try
 		}
 		if(existingLeadSource != "")
 		{
-			resultLog = resultLog + "Existing Lead_Source '" + existingLeadSource + "' found for BD ID " + bdUserId + " - it will be kept (not overwritten with 'IGP')\n";
+			resultLog = resultLog + "Existing Lead_Source '" + existingLeadSource + "' found for BD ID " + bdUserId + " - it is kept and used for any of this member's records whose Lead_Source is empty\n";
 		}
 		// -----------------------------------------
 		// ==================== VERIFIED_MEMBER_LIVE_API PATCH ====================
@@ -1237,7 +1237,6 @@ try
 						leadTagUpdate = Map();
 						leadTagUpdate.put("BD_Member_ID",bdUserId);
 						// ---- LEAD_SOURCE_IGP PATCH ----
-						leadTagUpdate.put("Lead_Source","IGP");
 						// -----------------------------------------
 						if(bdFirstName != null)
 						{
@@ -1328,7 +1327,6 @@ try
 				// ---- Final Contact field sync - covers matched, converted, or about-to-be-created ----
 				contactMap = Map();
 				contactMap.put("BD_Member_ID",bdUserId);
-				contactMap.put("Lead_Source","IGP");
 				if(bdFirstName != null)
 				{
 					contactMap.put("First_Name",bdFirstName);
@@ -1589,7 +1587,6 @@ try
 					stageChanged = currentStage != targetStage;
 					updateMap = Map();
 					// ---- LEAD_SOURCE_IGP PATCH ----
-					updateMap.put("Lead_Source","IGP");
 					// -----------------------------------------
 					if(accountId != "")
 					{
@@ -1901,7 +1898,6 @@ try
 					{
 						contactUpdate = Map();
 						contactUpdate.put("BD_Member_ID",bdUserId);
-						contactUpdate.put("Lead_Source","IGP");
 						if(bdFirstName != null)
 						{
 							contactUpdate.put("First_Name",bdFirstName);
@@ -1972,7 +1968,6 @@ try
 						}
 						fallbackContactMap = Map();
 						fallbackContactMap.put("BD_Member_ID",bdUserId);
-						fallbackContactMap.put("Lead_Source","IGP");
 						if(bdFirstName != null)
 						{
 							fallbackContactMap.put("First_Name",bdFirstName);
@@ -2066,7 +2061,6 @@ try
 						// -----------------------------------------
 						leadTagUpdate = Map();
 						leadTagUpdate.put("BD_Member_ID",bdUserId);
-						leadTagUpdate.put("Lead_Source","IGP");
 						// ---- CLAIMABLE_CONVERSION_GATE PATCH: Current_Plan on Lead ----
 						// This map never included Current_Plan/Top_Category at
 						// all, so a Lead correctly held back from converting
@@ -2104,7 +2098,6 @@ try
 							dealDetails.put("Stage",targetStage);
 							dealDetails.put("Closing_Date",zoho.currentdate);
 							dealDetails.put("BD_Member_ID",bdUserId);
-							dealDetails.put("Lead_Source","IGP");
 							if(safeAmount != null)
 							{
 								dealDetails.put("Amount",safeAmount);
@@ -2220,7 +2213,6 @@ try
 									newDealIdFromConversion = convertResp.get("Deals");
 									dealFixMap = Map();
 									dealFixMap.put("BD_Member_ID",bdUserId);
-									dealFixMap.put("Lead_Source","IGP");
 									if(mappedPlan != null && mappedPlan != "")
 									{
 										dealFixMap.put("Current_Plan",mappedPlan);
@@ -2337,7 +2329,6 @@ try
 								{
 									postConvertContactUpdate = Map();
 									postConvertContactUpdate.put("BD_Member_ID",bdUserId);
-									postConvertContactUpdate.put("Lead_Source","IGP");
 									if(mappedPlan != null && mappedPlan != "")
 									{
 										postConvertContactUpdate.put("Current_Plan",mappedPlan);
@@ -2386,7 +2377,6 @@ try
 							newContactId = contactSearchByBdId.get(0).get("id");
 							contactRefreshByBdId = Map();
 							contactRefreshByBdId.put("BD_Member_ID",bdUserId);
-							contactRefreshByBdId.put("Lead_Source","IGP");
 							if(bdFirstName != null)
 							{
 								contactRefreshByBdId.put("First_Name",bdFirstName);
@@ -2435,7 +2425,6 @@ try
 								newContactId = contactSearchByEmail.get(0).get("id");
 								contactRefresh = Map();
 								contactRefresh.put("BD_Member_ID",bdUserId);
-								contactRefresh.put("Lead_Source","IGP");
 								if(bdFirstName != null)
 								{
 									contactRefresh.put("First_Name",bdFirstName);
@@ -2483,7 +2472,6 @@ try
 						{
 							contactMap = Map();
 							contactMap.put("BD_Member_ID",bdUserId);
-							contactMap.put("Lead_Source","IGP");
 							contactMap.put("First_Name",bdFirstName);
 							contactMap.put("Last_Name",bdLastName);
 							contactMap.put("Email",bdEmail);
@@ -2521,7 +2509,6 @@ try
 						dealMap.put("Closing_Date",zoho.currentdate);
 						dealMap.put("Contact_Name",newContactId);
 						dealMap.put("BD_Member_ID",bdUserId);
-						dealMap.put("Lead_Source","IGP");
 						if(accountId != "")
 						{
 							dealMap.put("Account_Name",accountId);
@@ -2691,7 +2678,6 @@ try
 					leadId = leadMatches.get(0).get("id");
 					leadUpdate = Map();
 					leadUpdate.put("BD_Member_ID",bdUserId);
-					leadUpdate.put("Lead_Source","IGP");
 					if(bdFirstName != null)
 					{
 						leadUpdate.put("First_Name",bdFirstName);
@@ -2753,7 +2739,6 @@ try
 					leadCreate = Map();
 					leadCreate.put("BD_Member_ID",bdUserId);
 					leadCreate.put("Lead_Status","New Inquiry");
-					leadCreate.put("Lead_Source","IGP");
 					if(bdFirstName != null)
 					{
 						leadCreate.put("First_Name",bdFirstName);
@@ -2821,20 +2806,16 @@ try
 		// a UTM_Source is left alone, so later webhooks never overwrite the
 		// channel that originally brought the member in.
 		//
-		// ---- UTM_LEAD_SOURCE PATCH ----
-		// Any record carrying UTM values gets Lead_Source = "Meta Ads"
-		// (Accounts have no Lead_Source). This runs on EVERY webhook, after
-		// the main sync above has re-written Lead_Source = "IGP", so the
-		// value doesn't flip back. It is a separate call so that, if
-		// "Meta Ads" is missing from a module's Lead_Source picklist,
-		// only this write fails - the UTM fields still save.
-		utmLeadSourceValue = "Meta Ads";
-		// ---- LEAD_SOURCE_KEEP PATCH (2 of 2) ----
-		// Also runs when the person already had a non-IGP Lead_Source
-		// (existingLeadSource), even with no UTM values. That original
-		// source wins over both "IGP" and the UTM rule, and is restored on
-		// the Lead/Contact/Deal after the sync wrote "IGP".
-		if(bdUtmValues.size() > 0 || existingLeadSource != "")
+		// ---- LEAD_SOURCE_FILL_ONLY PATCH (Oct 2026) ----
+		// Lead_Source is set once and never replaced. The sync above no
+		// longer writes Lead_Source anywhere; this pass only FILLS it on a
+		// Lead/Contact/Deal of this member whose Lead_Source is empty:
+		//   - the person already came in through another channel
+		//     (existingLeadSource, e.g. SalesIQ / Meta Ads) -> that value
+		//   - otherwise (a direct BD signup with no record in Zoho) -> IGP
+		// A record that already has any Lead_Source is never touched, so
+		// overlapping runs can no longer flip it back and forth.
+		if(bdUserId != null && bdUserId != "")
 		{
 			utmUpdate = Map();
 			utmUpdate.put("UTM_Source",ifnull(bdUtmValues.get("utm_source"),""));
@@ -2872,15 +2853,16 @@ try
 									}
 								}
 							}
-							// ---- UTM_LEAD_SOURCE PATCH: apply ----
+							// ---- LEAD_SOURCE_FILL_ONLY PATCH: apply ----
+							currentLeadSource = ifnull(utmRec.get("Lead_Source"),"").toString().trim();
 							targetLeadSource = "";
-							if(existingLeadSource != "")
+							if(currentLeadSource == "" || currentLeadSource == "-None-")
 							{
-								targetLeadSource = existingLeadSource;
-							}
-							else if(recordHasUtm == true)
-							{
-								targetLeadSource = utmLeadSourceValue;
+								targetLeadSource = "IGP";
+								if(existingLeadSource != "")
+								{
+									targetLeadSource = existingLeadSource;
+								}
 							}
 							if(targetLeadSource != "" && utmModule != "Accounts")
 							{
