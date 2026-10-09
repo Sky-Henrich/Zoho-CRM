@@ -1,5 +1,7 @@
 # bd_sync_active_members — Session Summary
 
+> **Update (Oct 2026):** the live Zoho version, which had been kept as `standalone/script` on the `Web-Pixel` branch, is now this file again. It adds UTM tracking (`UTM_SOURCE_TRACKING`), fill-only `Lead_Source` (`LEAD_SOURCE_FILL_ONLY` / `LEAD_SOURCE_KEEP`), subscription date/amount/payment-option sync, and reworked Lead→Deal and Stage rules (`LISTING_VERIFIED_GATE`, `VERIFIED_CONVERSION_TRIGGER`, `FREE_TRIAL_STAGE`); the stale-Lead cleanup step was removed. Several notes below describe the earlier version — where they disagree, the code wins. See `README.md` for how this function works with the website's UTM capture script.
+
 Tracks the work done on `functions/standalone/bd_sync_active_members.dg`, the Deluge function that syncs Brilliant Directories (BD) member/subscription webhooks into Zoho CRM (Leads, Contacts, Accounts, Deals). All commits are on branch `claude/kind-sagan-gx43vg`.
 
 ## What we accomplished

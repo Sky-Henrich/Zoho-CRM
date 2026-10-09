@@ -48,6 +48,29 @@ bdOldSubscriptionNameBracket = "";
 // fallback for webhook types that don't carry it.
 bdNextDueDateBracket = "";
 bdBillingCycleBracket = "";
+// ---- SUBSCRIPTION_CREATED_DATE PATCH (1 of 4) ----
+// BD's Subscriptions tab "Created" column is the subscription's own
+// registration date ("subscription[regdate]" in the subscription_updated
+// webhook, "subscription_details.regdate" in the live API) - NOT the
+// member's signup_date. A member can sign up on one day and have their
+// subscription (re)created later, so Subscription_Start_Date must follow
+// regdate. signup_date is kept only as a last-resort fallback.
+//
+// The upgrade/purchase webhook (purchase_status=success) carries no
+// regdate, so for that event the purchase date is taken from
+// "upgrade_in_progress" (Unix timestamp of the purchase), then from the
+// live API order matching "orderid", then today's date.
+bdSubscriptionRegDateBracket = "";
+bdOrderIdRaw = "";
+bdPurchaseStatusRaw = "";
+bdUpgradeTimestampRaw = "";
+// ---- UTM_SOURCE_TRACKING PATCH (1 of 4) ----
+// The join/claim/business signup forms carry 4 hidden fields
+// (utm_source, utm_medium, utm_campaign, utm_content) filled in the
+// browser by the site-wide capture script (bd/utm_capture.html). BD saves
+// them on the member record, so they arrive either in the webhook body
+// (bare, user[...] or member[...] keys) or via the live user API below.
+bdUtmValues = Map();
 body = crmAPIRequest.get("body");
 if(body != null && body != "")
 {
@@ -104,6 +127,41 @@ if(body != null && body != "")
 			else if(fieldKey == "subscription[billingcycle]")
 			{
 				bdBillingCycleBracket = fieldValue;
+			}
+			// ---- SUBSCRIPTION_CREATED_DATE PATCH (2 of 4) ----
+			else if(fieldKey == "subscription[regdate]")
+			{
+				bdSubscriptionRegDateBracket = fieldValue;
+			}
+			else if(fieldKey == "orderid" || fieldKey == "subscription[orderid]")
+			{
+				bdOrderIdRaw = fieldValue;
+			}
+			else if(fieldKey == "purchase_status")
+			{
+				bdPurchaseStatusRaw = fieldValue;
+			}
+			else if(fieldKey == "upgrade_in_progress")
+			{
+				bdUpgradeTimestampRaw = fieldValue;
+			}
+			// ---- UTM_SOURCE_TRACKING PATCH (2 of 4) ----
+			else if(fieldKey.contains("utm_"))
+			{
+				// Plain string ops only (no regex): accepts utm_x, user[utm_x] and
+				// member[utm_x]; old_user[utm_x] (the pre-edit copy) is skipped.
+				if(!fieldKey.startsWith("old_"))
+				{
+					utmKey = fieldKey.remove("member[").remove("user[").remove("]").toLowerCase();
+					utmValue = fieldValue.trim();
+					// BD pre-fills Hidden Fields with their label ("UTM Source") -
+					// that placeholder is not a real value, so it is ignored.
+					utmPlaceholder = utmValue.toLowerCase().remove(" ").remove("_").remove("-");
+					if((utmKey == "utm_source" || utmKey == "utm_medium" || utmKey == "utm_campaign" || utmKey == "utm_content") && utmValue != "" && utmPlaceholder != utmKey.remove("_"))
+					{
+						bdUtmValues.put(utmKey,utmValue);
+					}
+				}
 			}
 			// -----------------------------------------
 			else if(fieldKey == "amount")
@@ -200,7 +258,7 @@ if(bdMemberTypeRaw == null || bdMemberTypeRaw == "")
 bdDueDateFromWebhook = null;
 if(bdNextDueDateBracket != null && bdNextDueDateBracket != "" && bdNextDueDateBracket != "0000-00-00")
 {
-	try
+	try 
 	{
 		bdDueDateFromWebhook = bdNextDueDateBracket.toDate("yyyy-MM-dd");
 	}
@@ -210,9 +268,14 @@ if(bdNextDueDateBracket != null && bdNextDueDateBracket != "" && bdNextDueDateBr
 	}
 }
 subscriptionStartDate = null;
+// ---- TRANSACTION_START_DATE PATCH (1 of 3) ----
+// BD "Created" date of the Active subscription. Subscription_Start_Date now
+// comes from the Transactions "Date" instead, but the 3-month Free Trial
+// check still measures from Created -> Next Payment.
+trialAnchorDate = null;
 if(bdSignupDateRaw != null && bdSignupDateRaw.length() == 14)
 {
-	try
+	try 
 	{
 		signupYear = bdSignupDateRaw.substring(0,4);
 		signupMonth = bdSignupDateRaw.substring(4,6);
@@ -226,14 +289,58 @@ if(bdSignupDateRaw != null && bdSignupDateRaw.length() == 14)
 		subscriptionStartDate = null;
 	}
 }
+// ---- SUBSCRIPTION_CREATED_DATE PATCH (3 of 4) ----
+// The webhook's subscription[regdate] (BD "Created" date) wins over
+// signup_date when present.
+subscriptionStartDateFromWebhook = null;
+if(bdSubscriptionRegDateBracket != null && bdSubscriptionRegDateBracket != "" && bdSubscriptionRegDateBracket != "0000-00-00")
+{
+	try 
+	{
+		subscriptionStartDateFromWebhook = bdSubscriptionRegDateBracket.toDate("yyyy-MM-dd");
+		subscriptionStartDate = subscriptionStartDateFromWebhook;
+	}
+	catch (regDateError)
+	{
+		resultLog = resultLog + "WARNING: could not parse subscription[regdate] '" + bdSubscriptionRegDateBracket + "' for BD ID " + bdUserId + "\n";
+	}
+}
+// Plan purchase/upgrade: upgrade_in_progress is the Unix timestamp (seconds)
+// of the purchase. Converted to a Panama-local date (fixed UTC-5, no DST).
+bdIsPlanPurchase = false;
+if(bdPurchaseStatusRaw != null && bdPurchaseStatusRaw.toLowerCase() == "success")
+{
+	bdIsPlanPurchase = true;
+}
+if(subscriptionStartDateFromWebhook == null && bdIsPlanPurchase && bdUpgradeTimestampRaw != null && bdUpgradeTimestampRaw != "" && bdUpgradeTimestampRaw != "0")
+{
+	try 
+	{
+		purchaseLocalSecs = bdUpgradeTimestampRaw.toLong() - 18000;
+		purchaseDays = ((purchaseLocalSecs - purchaseLocalSecs % 86400) / 86400).toLong();
+		subscriptionStartDateFromWebhook = "1970-01-01".toDate("yyyy-MM-dd").addDay(purchaseDays);
+		subscriptionStartDate = subscriptionStartDateFromWebhook;
+	}
+	catch (upgradeTsError)
+	{
+		resultLog = resultLog + "WARNING: could not parse upgrade_in_progress '" + bdUpgradeTimestampRaw + "' for BD ID " + bdUserId + "\n";
+	}
+}
+// -----------------------------------------
+// ---- PAYMENT_OPTION PATCH (1 of 2) ----
+// BD writes the cycle as "Monthly" / "Annually" on subscriptions and
+// "monthly" / "yearly" on member records - all map to the CRM picklist.
+// Recomputed below from the member's Active subscription (2 of 2), which
+// wins over this webhook-body value.
 paymentOptionValue = "";
 if(bdMemberTypeRaw != null)
 {
-	if(bdMemberTypeRaw.toLowerCase() == "yearly")
+	cycleLower = bdMemberTypeRaw.toString().trim().toLowerCase();
+	if(cycleLower == "yearly" || cycleLower == "annually" || cycleLower == "annual" || cycleLower == "year")
 	{
 		paymentOptionValue = "Annually";
 	}
-	else if(bdMemberTypeRaw.toLowerCase() == "monthly")
+	else if(cycleLower == "monthly" || cycleLower == "month")
 	{
 		paymentOptionValue = "Monthly";
 	}
@@ -349,7 +456,7 @@ pillarAnnualPriceMap.put("Experience","750");
 pillarAnnualPriceMap.put("Relocate","2,050");
 pillarAnnualPriceMap.put("Visit","950");
 // ==================================================================================
-try
+try 
 {
 	response = invokeurl
 	[
@@ -373,7 +480,7 @@ try
 		transactionsList = u.get("transactions");
 		if(transactionsList != null && transactionsList != false)
 		{
-			try
+			try 
 			{
 				if(transactionsList.size() > 0)
 				{
@@ -398,12 +505,49 @@ try
 							bdDueDate = bdNextDueDateRaw.toDate("yyyy-MM-dd");
 						}
 					}
+					// ---- SUBSCRIPTION_CREATED_DATE PATCH (4 of 4) ----
+					// Live API fallback for BD's "Created" date when the
+					// incoming webhook carried neither subscription[regdate]
+					// nor a purchase timestamp. Prefer the order matching the
+					// webhook's orderid; otherwise the latest transaction.
+					if(subscriptionStartDateFromWebhook == null)
+					{
+						regDateDetails = subscriptionDetails;
+						if(bdOrderIdRaw != null && bdOrderIdRaw != "")
+						{
+							for each  tx in transactionsList
+							{
+								txSubDetails = tx.get("subscription_details");
+								if(txSubDetails != null && (txSubDetails.get("orderid") + "" == bdOrderIdRaw || txSubDetails.get("id") + "" == bdOrderIdRaw))
+								{
+									regDateDetails = txSubDetails;
+									break;
+								}
+							}
+						}
+						if(regDateDetails != null)
+						{
+							bdRegDateRaw = regDateDetails.get("regdate");
+							if(bdRegDateRaw != null && bdRegDateRaw != "" && bdRegDateRaw != "0000-00-00")
+							{
+								subscriptionStartDate = bdRegDateRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
+								subscriptionStartDateFromWebhook = subscriptionStartDate;
+							}
+						}
+					}
+					// -----------------------------------------
 				}
 			}
 			catch (txError)
 			{
 				resultLog = resultLog + "WARNING: unexpected transactions format for BD ID " + bdUserId + ": " + txError + "\n";
 			}
+		}
+		// A successful plan purchase with no date found anywhere above
+		// happened now - use today's date rather than the old signup_date.
+		if(subscriptionStartDateFromWebhook == null && bdIsPlanPurchase)
+		{
+			subscriptionStartDate = zoho.currentdate;
 		}
 		// The subscription_updated webhook's own "subscription[nextduedate]"
 		// is the freshest source available - prefer it over whatever the
@@ -412,6 +556,162 @@ try
 		{
 			bdDueDate = bdDueDateFromWebhook;
 		}
+		// ---- ACTIVE_SUBSCRIPTION_SYNC PATCH ----
+		// Source of truth: BD's Subscriptions tab. Whatever webhook fired,
+		// scan every order in the live API response for the one whose
+		// status (domainstatus) is "Active" and sync:
+		//   BD "Created"      (regdate)     -> Subscription_Start_Date
+		//   BD "Next Payment" (nextduedate) -> BD_Due_Date
+		//   BD "Subscription" amount         -> Amount
+		//   BD "Subscription" billing cycle  -> Payment_Option (Monthly/Annually)
+		// This overrides the webhook values above: the subscription_updated
+		// webhook's subscription[nextduedate] can be the pre-edit value
+		// (e.g. 2026-10-24 posted while BD shows 24/12/2026). If several
+		// orders are Active, the most recently created one wins. If none is
+		// Active (or the API omits these fields), the fallbacks above stand.
+		activeSubDetails = null;
+		activeSubRegDate = null;
+		activeSubAmountRaw = null;
+		activeSubCycleRaw = "";
+		txAmountRaw = null;
+		if(transactionsList != null && transactionsList != false)
+		{
+			try 
+			{
+				for each  tx in transactionsList
+				{
+					txSubDetails = tx.get("subscription_details");
+					if(txSubDetails != null && txSubDetails.get("domainstatus") != null && txSubDetails.get("domainstatus").toString().equalsIgnoreCase("Active"))
+					{
+						txRegDate = null;
+						txRegDateRaw = txSubDetails.get("regdate");
+						if(txRegDateRaw != null && txRegDateRaw != "" && txRegDateRaw != "0000-00-00")
+						{
+							txRegDate = txRegDateRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
+						}
+						if(activeSubDetails == null || txRegDate != null && (activeSubRegDate == null || txRegDate > activeSubRegDate))
+						{
+							activeSubDetails = txSubDetails;
+							activeSubRegDate = txRegDate;
+						}
+					}
+				}
+				if(activeSubDetails != null)
+				{
+					if(activeSubRegDate != null)
+					{
+						subscriptionStartDate = activeSubRegDate;
+						trialAnchorDate = activeSubRegDate;
+					}
+					// ---- TRANSACTION_START_DATE PATCH (2 of 3) ----
+					// Subscription_Start_Date = BD Transactions "Date": the
+					// earliest PAID invoice of this Active subscription (its
+					// first payment). If none is linked to the subscription
+					// (e.g. the only payment is a "Lead #" purchase), the
+					// member's most recent paid transaction is used. Last
+					// resort: the subscription's Created date.
+					// Amount = the "Amount" of that same transaction row.
+					firstPaidDate = null;
+					latestAnyPaidDate = null;
+					firstPaidAmount = null;
+					latestAnyPaidAmount = null;
+					activeSubId = activeSubDetails.get("id") + "";
+					for each  payTx in transactionsList
+					{
+						payTxSub = payTx.get("subscription_details");
+						payTxInvoice = payTx.get("invoice_details");
+						if(payTxInvoice != null && ifnull(payTxInvoice.get("status"),"").toString().equalsIgnoreCase("Paid"))
+						{
+							payDateRaw = ifnull(payTxInvoice.get("datepaid"),"").toString().trim();
+							if(payDateRaw == "" || payDateRaw.startsWith("0000"))
+							{
+								payDateRaw = ifnull(payTxInvoice.get("date"),"").toString().trim();
+							}
+							if(payDateRaw != "" && !payDateRaw.startsWith("0000") && payDateRaw.length() >= 10)
+							{
+								payDate = payDateRaw.substring(0,10).toDate("yyyy-MM-dd");
+								payAmount = payTxInvoice.get("total");
+								if(payAmount == null || payAmount.toString().trim() == "")
+								{
+									payAmount = payTxInvoice.get("amount");
+								}
+								if(payAmount == null || payAmount.toString().trim() == "")
+								{
+									payAmount = payTxInvoice.get("subtotal");
+								}
+								if(latestAnyPaidDate == null || payDate > latestAnyPaidDate)
+								{
+									latestAnyPaidDate = payDate;
+									latestAnyPaidAmount = payAmount;
+								}
+								if(payTxSub != null && payTxSub.get("id") + "" == activeSubId && (firstPaidDate == null || payDate < firstPaidDate))
+								{
+									firstPaidDate = payDate;
+									firstPaidAmount = payAmount;
+								}
+							}
+						}
+					}
+					if(firstPaidDate != null)
+					{
+						subscriptionStartDate = firstPaidDate;
+						txAmountRaw = firstPaidAmount;
+					}
+					else if(latestAnyPaidDate != null)
+					{
+						subscriptionStartDate = latestAnyPaidDate;
+						txAmountRaw = latestAnyPaidAmount;
+						resultLog = resultLog + "No paid invoice linked to order " + activeSubId + " - Subscription_Start_Date uses the member's latest paid transaction (" + latestAnyPaidDate + ") for BD ID " + bdUserId + "\n";
+					}
+					else
+					{
+						resultLog = resultLog + "No paid transaction date found for order " + activeSubId + " (BD ID " + bdUserId + ") - Subscription_Start_Date uses the subscription Created date\n";
+					}
+					// ---- PAYMENT_OPTION PATCH (2 of 2) + SUBSCRIPTION_AMOUNT PATCH (1 of 2) ----
+					// BD "Subscription" column: amount + billing cycle
+					// (e.g. "15.00/Monthly", "0.00/Annually").
+					activeSubAmountRaw = activeSubDetails.get("amount");
+					activeSubCycleRaw = ifnull(activeSubDetails.get("billingcycle"),"").toString().trim().toLowerCase();
+					if(activeSubCycleRaw == "yearly" || activeSubCycleRaw == "annually" || activeSubCycleRaw == "annual" || activeSubCycleRaw == "year")
+					{
+						paymentOptionValue = "Annually";
+					}
+					else if(activeSubCycleRaw == "monthly" || activeSubCycleRaw == "month")
+					{
+						paymentOptionValue = "Monthly";
+					}
+					activeNextDueRaw = activeSubDetails.get("nextduedate");
+					if(activeNextDueRaw != null && activeNextDueRaw != "" && activeNextDueRaw != "0000-00-00")
+					{
+						bdDueDate = activeNextDueRaw.toString().substring(0,10).toDate("yyyy-MM-dd");
+					}
+					resultLog = resultLog + "Active BD subscription (order " + activeSubDetails.get("id") + ") synced: Subscription_Start_Date=" + subscriptionStartDate + " BD_Due_Date=" + bdDueDate + " Amount=" + ifnull(txAmountRaw,activeSubAmountRaw) + " Payment_Option=" + paymentOptionValue + " for BD ID " + bdUserId + "\n";
+				}
+				else
+				{
+					resultLog = resultLog + "No Active subscription found in BD API for BD ID " + bdUserId + " - using webhook/fallback dates\n";
+				}
+			}
+			catch (activeSubError)
+			{
+				resultLog = resultLog + "WARNING: could not read Active subscription for BD ID " + bdUserId + ": " + activeSubError + "\n";
+			}
+		}
+		// -----------------------------------------
+		// ---- UTM_SOURCE_TRACKING PATCH (3 of 4) ----
+		// Fill any UTM value the webhook didn't carry from the member record.
+		for each  utmKey in {"utm_source","utm_medium","utm_campaign","utm_content"}
+		{
+			if(bdUtmValues.get(utmKey) == null)
+			{
+				utmApiValue = u.get(utmKey);
+				if(utmApiValue != null && utmApiValue.toString().trim() != "" && utmApiValue.toString().toLowerCase().remove(" ").remove("_").remove("-") != utmKey.remove("_"))
+				{
+					bdUtmValues.put(utmKey,utmApiValue.toString().trim());
+				}
+			}
+		}
+		// -----------------------------------------
 		bdCompanyName = u.get("company");
 		if(bdCompanyName != null && bdCompanyName.trim().equalsIgnoreCase("Individual"))
 		{
@@ -425,6 +725,48 @@ try
 		{
 			bdLastName = "Unknown";
 		}
+		// ---- LEAD_SOURCE_KEEP PATCH (1 of 2) ----
+		// Other channels create records before a BD signup: LeadChain (Meta
+		// ads) -> Lead_Source "Meta Ads", SalesIQ (website chat) ->
+		// "SalesIQ". When that person later signs up on BD, the sync below
+		// matches the record by email/phone and writes "IGP" over it.
+		// Snapshot here, BEFORE any write, any existing Lead_Source that is
+		// not "IGP", so it can be put back afterwards.
+		existingLeadSource = "";
+		for each  metaModule in {"Leads","Contacts"}
+		{
+			if(existingLeadSource == "")
+			{
+				try 
+				{
+					metaMatches = zoho.crm.searchRecords(metaModule,"(BD_Member_ID:equals:" + bdUserId + ")");
+					if((metaMatches == null || metaMatches.size() == 0) && bdEmail != null && bdEmail != "")
+					{
+						metaMatches = zoho.crm.searchRecords(metaModule,"(Email:equals:" + bdEmail + ")");
+					}
+					if(metaMatches != null && metaMatches.size() > 0)
+					{
+						for each  metaRec in metaMatches
+						{
+							recLeadSource = ifnull(metaRec.get("Lead_Source"),"").toString().trim();
+							if(existingLeadSource == "" && recLeadSource != "" && recLeadSource != "IGP" && recLeadSource != "-None-")
+							{
+								existingLeadSource = recLeadSource;
+							}
+						}
+					}
+				}
+				catch (metaSnapshotError)
+				{
+					resultLog = resultLog + "WARNING: Lead_Source check failed on " + metaModule + " for BD ID " + bdUserId + ": " + metaSnapshotError + "\n";
+				}
+			}
+		}
+		if(existingLeadSource != "")
+		{
+			resultLog = resultLog + "Existing Lead_Source '" + existingLeadSource + "' found for BD ID " + bdUserId + " - it is kept and used for any of this member's records whose Lead_Source is empty\n";
+		}
+		// -----------------------------------------
 		// ==================== VERIFIED_MEMBER_LIVE_API PATCH ====================
 		// The webhook body's "user[verified]" field parsed empty on a real
 		// payload that clearly contained it, root cause not pinned down.
@@ -583,7 +925,7 @@ try
 			cleanedPriceStr = rawPriceStr.replaceAll("[^0-9.]","");
 			if(cleanedPriceStr != null && cleanedPriceStr != "")
 			{
-				try
+				try 
 				{
 					safeAmount = cleanedPriceStr.toDecimal();
 				}
@@ -610,7 +952,7 @@ try
 			cleanedPayloadAmount = bdAmountRaw.toString().trim().replaceAll("[^0-9.]","");
 			if(cleanedPayloadAmount != null && cleanedPayloadAmount != "")
 			{
-				try
+				try 
 				{
 					payloadAmountDecimal = cleanedPayloadAmount.toDecimal();
 					if(payloadAmountDecimal > 0)
@@ -625,6 +967,37 @@ try
 				}
 			}
 		}
+		// ---- SUBSCRIPTION_AMOUNT PATCH (2 of 2) ----
+		// Amount = BD Transactions "Amount" of the paid transaction that set
+		// Subscription_Start_Date. If there is none, the Active
+		// subscription's amount ("Subscription" column); the plan list price
+		// is only the last resort. Exception: on a plan purchase webhook a
+		// positive payload amount is kept, since BD's API can lag the
+		// purchase by a moment.
+		if(txAmountRaw != null && txAmountRaw.toString().trim() != "")
+		{
+			activeSubAmountRaw = txAmountRaw;
+		}
+		if(activeSubAmountRaw != null && activeSubAmountRaw.toString().trim() != "")
+		{
+			keepPayloadAmount = false;
+			if(bdIsPlanPurchase == true && safeAmount != null && safeAmount > 0 && bdAmountRaw != null && bdAmountRaw != "")
+			{
+				keepPayloadAmount = true;
+			}
+			if(keepPayloadAmount == false)
+			{
+				try 
+				{
+					safeAmount = activeSubAmountRaw.toString().trim().replaceAll("[^0-9.]","").toDecimal();
+				}
+				catch (subAmountError)
+				{
+					resultLog = resultLog + "WARNING: could not parse subscription amount '" + activeSubAmountRaw + "' for BD ID " + bdUserId + "\n";
+				}
+			}
+		}
+		// -----------------------------------------
 		mappedPlan = "";
 		topCategoryValue = "";
 		if(rawPlan != null)
@@ -735,9 +1108,26 @@ try
 		// they never go into the Leads module long-term. Individual ->
 		// Contacts only. Community -> Accounts + Contacts.
 		// ---------------------------------------------------------------
+		// ---- LISTING_VERIFIED_GATE PATCH ----
+		// A free "X Listing" member stays in Leads until BD marks it
+		// Verified - also when it signed up directly in BD with no Lead in
+		// Zoho yet. Once Verified, the next webhook converts that Lead to a
+		// Deal at stage Listing. A Deal that already exists for this BD ID
+		// keeps being updated as a Deal (never pushed back to Leads).
+		listingAwaitingVerification = false;
+		if(isSalesOutreachListingPlan == true && mappedVerifiedMember != "YES - Verified")
+		{
+			existingDealForMember = zoho.crm.searchRecords("Deals","(BD_Member_ID:equals:" + bdUserId + ")");
+			if(existingDealForMember == null || existingDealForMember.size() == 0)
+			{
+				listingAwaitingVerification = true;
+				resultLog = resultLog + "Listing member BD ID " + bdUserId + " is not Verified yet - kept in Leads until BD marks it Verified\n";
+			}
+		}
+		// -----------------------------------------
 		if(topCategoryValue == "Individual" || topCategoryValue == "Community")
 		{
-			try
+			try 
 			{
 				// ---- ACCOUNT (Community only) - match existing or create ----
 				accountId = "";
@@ -756,7 +1146,7 @@ try
 						}
 						acctNameToUse = acctNameToUse.trim();
 					}
-					try
+					try 
 					{
 						acctSearch = zoho.crm.searchRecords("Accounts","(BD_Member_ID:equals:" + bdUserId + ")");
 						if((acctSearch == null || acctSearch.size() == 0) && acctNameToUse != null && acctNameToUse != "")
@@ -842,12 +1232,11 @@ try
 				if(leadId != null && leadId != "")
 				{
 					// ---- CONVERT the matched Lead into a Contact (+ Account for Community) ----
-					try
+					try 
 					{
 						leadTagUpdate = Map();
 						leadTagUpdate.put("BD_Member_ID",bdUserId);
 						// ---- LEAD_SOURCE_IGP PATCH ----
-						leadTagUpdate.put("Lead_Source","IGP");
 						// -----------------------------------------
 						if(bdFirstName != null)
 						{
@@ -938,7 +1327,6 @@ try
 				// ---- Final Contact field sync - covers matched, converted, or about-to-be-created ----
 				contactMap = Map();
 				contactMap.put("BD_Member_ID",bdUserId);
-				contactMap.put("Lead_Source","IGP");
 				if(bdFirstName != null)
 				{
 					contactMap.put("First_Name",bdFirstName);
@@ -1005,19 +1393,28 @@ try
 		// path below. A true paid, non-listing plan still qualifies exactly
 		// as before via the original transactionIsPaid/isFreeListingPlan
 		// condition.
-		else if((userActive == 2 || userActive == "2") && (isSalesOutreachListingPlan == true || transactionIsPaid == true && isFreeListingPlan == false))
+		else if((userActive == 2 || userActive == "2") && listingAwaitingVerification == false && (isSalesOutreachListingPlan == true || transactionIsPaid == true && isFreeListingPlan == false))
 		{
-			// ==================== CLOSED_WON_CRITERIA PATCH (2 of 2) ====================
-			// Closed Won requires ALL three: a real amount paid (>0), the
-			// Current_Plan being one of the ten Verificado/Impulso tiers, and
-			// the Deal's Trial_Plan field being empty (checked further below,
-			// once an existing Deal's current Trial_Plan value is available -
-			// a brand-new Deal has no prior Trial_Plan so trivially satisfies
-			// this one). Sales Outreach is the default/fallback whenever any
-			// of these don't hold, same as it already is for the five free
-			// listing plans - it's the general "still in the funnel, not yet
-			// won" stage now, not just the free-listing-specific one.
-			targetStage = "Sales Outreach";
+			// ==================== PLAN_LEVEL_STAGES PATCH ====================
+			// Deal Stage = the member's BD plan level (Sarah, 12 Sep 2026), not
+			// a sales stage. There is no Sales Outreach / Closed Won any more;
+			// a Deal is an active client and stays open. Pipeline "Standard":
+			//   Free Trial  - Verificado/Impulso plan whose BD Next Payment
+			//                 (BD_Due_Date) is exactly 3 months after its BD
+			//                 Created date (Subscription_Start_Date)
+			//   Listing     - any "X Listing" plan
+			//   Verificado  - any "X Verificado" plan
+			//   Impulso     - any "X Impulso" plan
+			// A plan change in BD moves the Deal to the matching stage.
+			targetStage = "Listing";
+			if(mappedPlan != null && mappedPlan.contains("Impulso"))
+			{
+				targetStage = "Impulso";
+			}
+			else if(mappedPlan != null && mappedPlan.contains("Verificado"))
+			{
+				targetStage = "Verificado";
+			}
 			// ---- CLAIMABLE_CONVERSION_GATE PATCH: default ----
 			// Defined here, at the top of the whole branch, so every path
 			// through it (existing Deal found, no Lead found, direct
@@ -1030,12 +1427,37 @@ try
 			// exists - wrong when conversion was correctly skipped).
 			canConvertLead = true;
 			// -----------------------------------------
-			if(isSalesOutreachListingPlan == false && safeAmount != null && safeAmount > 0 && isVerificadoOrImpulsoPlan == true)
+			// ---- FREE_TRIAL_STAGE PATCH ----
+			// The 3-month free plan: BD_Due_Date exactly 3 months after
+			// Subscription_Start_Date on a Verificado/Impulso plan -> Free
+			// Trial, whatever the amount (the amount is what they will pay
+			// once the free months end). Compared as yyyy-MM-dd strings so no
+			// time component can cause a mismatch.
+			if(isVerificadoOrImpulsoPlan == true && subscriptionStartDate != null && bdDueDate != null)
 			{
-				targetStage = "Closed Won";
+				try 
+				{
+					// ---- TRANSACTION_START_DATE PATCH (3 of 3) ----
+					trialFrom = subscriptionStartDate;
+					if(trialAnchorDate != null)
+					{
+						trialFrom = trialAnchorDate;
+					}
+					trialEndExpected = trialFrom.addMonth(3).toString("yyyy-MM-dd");
+					if(bdDueDate.toString("yyyy-MM-dd") == trialEndExpected)
+					{
+						targetStage = "Free Trial";
+						resultLog = resultLog + "Free Trial detected (BD_Due_Date " + trialEndExpected + " = BD Created date + 3 months) for BD ID " + bdUserId + "\n";
+					}
+				}
+				catch (freeTrialError)
+				{
+					resultLog = resultLog + "WARNING: Free Trial date check failed for BD ID " + bdUserId + ": " + freeTrialError + "\n";
+				}
 			}
+			resultLog = resultLog + "Deal Stage target for BD ID " + bdUserId + ": " + targetStage + " (plan " + mappedPlan + ")\n";
 			// ==================================================================================
-			try
+			try 
 			{
 				accountId = "";
 				acctNameToUse = bdCompanyName;
@@ -1051,7 +1473,7 @@ try
 					}
 					acctNameToUse = acctNameToUse.trim();
 				}
-				try
+				try 
 				{
 					acctSearch = zoho.crm.searchRecords("Accounts","(Account_Name:equals:" + acctNameToUse + ")");
 					if(acctSearch != null && acctSearch.size() > 0)
@@ -1165,7 +1587,6 @@ try
 					stageChanged = currentStage != targetStage;
 					updateMap = Map();
 					// ---- LEAD_SOURCE_IGP PATCH ----
-					updateMap.put("Lead_Source","IGP");
 					// -----------------------------------------
 					if(accountId != "")
 					{
@@ -1320,7 +1741,7 @@ try
 						if(stageUpdateResp != null && stageUpdateResp.get("status") == "error" && stageUpdateResp.get("code") == "RECORD_IN_BLUEPRINT")
 						{
 							resultLog = resultLog + "Deal Stage is Blueprint-locked for BD ID " + bdUserId + " - attempting Blueprint transition to '" + targetStage + "'\n";
-							try
+							try 
 							{
 								bpTransitionId = "";
 								bpAvailableNames = "";
@@ -1477,7 +1898,6 @@ try
 					{
 						contactUpdate = Map();
 						contactUpdate.put("BD_Member_ID",bdUserId);
-						contactUpdate.put("Lead_Source","IGP");
 						if(bdFirstName != null)
 						{
 							contactUpdate.put("First_Name",bdFirstName);
@@ -1548,7 +1968,6 @@ try
 						}
 						fallbackContactMap = Map();
 						fallbackContactMap.put("BD_Member_ID",bdUserId);
-						fallbackContactMap.put("Lead_Source","IGP");
 						if(bdFirstName != null)
 						{
 							fallbackContactMap.put("First_Name",bdFirstName);
@@ -1626,23 +2045,22 @@ try
 					{
 						leadRecord = leadMatches.get(0);
 						leadId = leadRecord.get("id");
-						// ---- CLAIMABLE_CONVERSION_GATE PATCH (4 of 4) ----
-						// A lead that just moved off Claimable onto a Listing
-						// plan must ALSO be Verified before converting to a
-						// Deal - both conditions required, matching neither
-						// being sufficient alone. Leads that were never
-						// Claimable (a brand-new public signup) are
-						// unaffected and keep converting as soon as they're
-						// on a Listing plan, same as before.
+						// ---- VERIFIED_CONVERSION_TRIGGER PATCH ----
+						// (Sarah, 12 Sep 2026) A Lead already in Zoho moves to
+						// Deals only when BD shows the member Active AND
+						// Verified - for every plan level (Listing, Verificado,
+						// Impulso), not just Leads coming from Claimable. Until
+						// then it stays a Lead, tagged with the latest plan.
+						// A direct BD signup with no Lead in Zoho is not gated:
+						// it skips the Lead stage and goes straight to Deals.
 						canConvertLead = true;
-						if(wasClaimable == true && isSalesOutreachListingPlan == true && mappedVerifiedMember != "YES - Verified")
+						if(mappedVerifiedMember != "YES - Verified")
 						{
 							canConvertLead = false;
 						}
 						// -----------------------------------------
 						leadTagUpdate = Map();
 						leadTagUpdate.put("BD_Member_ID",bdUserId);
-						leadTagUpdate.put("Lead_Source","IGP");
 						// ---- CLAIMABLE_CONVERSION_GATE PATCH: Current_Plan on Lead ----
 						// This map never included Current_Plan/Top_Category at
 						// all, so a Lead correctly held back from converting
@@ -1680,7 +2098,6 @@ try
 							dealDetails.put("Stage",targetStage);
 							dealDetails.put("Closing_Date",zoho.currentdate);
 							dealDetails.put("BD_Member_ID",bdUserId);
-							dealDetails.put("Lead_Source","IGP");
 							if(safeAmount != null)
 							{
 								dealDetails.put("Amount",safeAmount);
@@ -1789,14 +2206,13 @@ try
 							convertValues.put("overwrite",true);
 							convertResp = zoho.crm.convertLead(leadId,convertValues);
 							resultLog = resultLog + "Lead conversion attempted for BD ID " + bdUserId + " - response: " + convertResp + "\n";
-							try
+							try 
 							{
 								if(convertResp != null && convertResp.get("Deals") != null)
 								{
 									newDealIdFromConversion = convertResp.get("Deals");
 									dealFixMap = Map();
 									dealFixMap.put("BD_Member_ID",bdUserId);
-									dealFixMap.put("Lead_Source","IGP");
 									if(mappedPlan != null && mappedPlan != "")
 									{
 										dealFixMap.put("Current_Plan",mappedPlan);
@@ -1894,7 +2310,7 @@ try
 							}
 							else if(convertResp != null)
 							{
-								try
+								try 
 								{
 									convertedContactRef = convertResp.get("Contacts");
 									if(convertedContactRef != null)
@@ -1909,11 +2325,10 @@ try
 							}
 							if(resultContactId != null && resultContactId != "")
 							{
-								try
+								try 
 								{
 									postConvertContactUpdate = Map();
 									postConvertContactUpdate.put("BD_Member_ID",bdUserId);
-									postConvertContactUpdate.put("Lead_Source","IGP");
 									if(mappedPlan != null && mappedPlan != "")
 									{
 										postConvertContactUpdate.put("Current_Plan",mappedPlan);
@@ -1949,7 +2364,7 @@ try
 						}
 						else
 						{
-							resultLog = resultLog + "Lead not converted to Deal for BD ID " + bdUserId + " - was Claimable and is now on a Listing plan, but Verified_Member is not YES yet\n";
+							resultLog = resultLog + "Lead not converted to Deal for BD ID " + bdUserId + " - existing Lead is on plan " + mappedPlan + " but Verified_Member is not YES yet (Lead converts once BD marks the member Verified)\n";
 						}
 					}
 					else
@@ -1962,7 +2377,6 @@ try
 							newContactId = contactSearchByBdId.get(0).get("id");
 							contactRefreshByBdId = Map();
 							contactRefreshByBdId.put("BD_Member_ID",bdUserId);
-							contactRefreshByBdId.put("Lead_Source","IGP");
 							if(bdFirstName != null)
 							{
 								contactRefreshByBdId.put("First_Name",bdFirstName);
@@ -2011,7 +2425,6 @@ try
 								newContactId = contactSearchByEmail.get(0).get("id");
 								contactRefresh = Map();
 								contactRefresh.put("BD_Member_ID",bdUserId);
-								contactRefresh.put("Lead_Source","IGP");
 								if(bdFirstName != null)
 								{
 									contactRefresh.put("First_Name",bdFirstName);
@@ -2059,7 +2472,6 @@ try
 						{
 							contactMap = Map();
 							contactMap.put("BD_Member_ID",bdUserId);
-							contactMap.put("Lead_Source","IGP");
 							contactMap.put("First_Name",bdFirstName);
 							contactMap.put("Last_Name",bdLastName);
 							contactMap.put("Email",bdEmail);
@@ -2097,7 +2509,6 @@ try
 						dealMap.put("Closing_Date",zoho.currentdate);
 						dealMap.put("Contact_Name",newContactId);
 						dealMap.put("BD_Member_ID",bdUserId);
-						dealMap.put("Lead_Source","IGP");
 						if(accountId != "")
 						{
 							dealMap.put("Account_Name",accountId);
@@ -2197,7 +2608,7 @@ try
 			{
 				resultLog = resultLog + "Error processing BD ID " + bdUserId + ": " + recordError + "\n";
 			}
-			try
+			try 
 			{
 				// ---- CLAIMABLE_CONVERSION_GATE PATCH: cleanup guard ----
 				// This cleanup assumes any Lead still found here is a stale
@@ -2209,30 +2620,30 @@ try
 				// show for it - skip cleanup entirely in that case.
 				if(canConvertLead == true)
 				{
-				cleanupMatches = zoho.crm.searchRecords("Leads","(BD_Member_ID:equals:" + bdUserId + ")");
-				if((cleanupMatches == null || cleanupMatches.size() == 0) && bdEmail != null && bdEmail != "")
-				{
-					cleanupMatches = zoho.crm.searchRecords("Leads","(Email:equals:" + bdEmail + ")");
-				}
-				if((cleanupMatches == null || cleanupMatches.size() == 0) && bdPhone != null && bdPhone != "")
-				{
-					cleanupMatches = zoho.crm.searchRecords("Leads","(Phone:equals:" + bdPhone + ")");
-				}
-				if((cleanupMatches == null || cleanupMatches.size() == 0) && bdCompanyName != null && bdCompanyName != "")
-				{
-					cleanupMatches = zoho.crm.searchRecords("Leads","(Company:equals:" + bdCompanyName + ")");
-				}
-				if(cleanupMatches != null && cleanupMatches.size() > 0)
-				{
-					for each  staleLead in cleanupMatches
+					cleanupMatches = zoho.crm.searchRecords("Leads","(BD_Member_ID:equals:" + bdUserId + ")");
+					if((cleanupMatches == null || cleanupMatches.size() == 0) && bdEmail != null && bdEmail != "")
 					{
-						deleteMap = Map();
-						deleteMap.put("module","Leads");
-						deleteMap.put("id",staleLead.get("id"));
-						zoho.crm.invokeConnector("crm.delete",deleteMap);
-						resultLog = resultLog + "Removed stale Lead " + staleLead.get("id") + " for paid BD ID " + bdUserId + "\n";
+						cleanupMatches = zoho.crm.searchRecords("Leads","(Email:equals:" + bdEmail + ")");
 					}
-				}
+					if((cleanupMatches == null || cleanupMatches.size() == 0) && bdPhone != null && bdPhone != "")
+					{
+						cleanupMatches = zoho.crm.searchRecords("Leads","(Phone:equals:" + bdPhone + ")");
+					}
+					if((cleanupMatches == null || cleanupMatches.size() == 0) && bdCompanyName != null && bdCompanyName != "")
+					{
+						cleanupMatches = zoho.crm.searchRecords("Leads","(Company:equals:" + bdCompanyName + ")");
+					}
+					if(cleanupMatches != null && cleanupMatches.size() > 0)
+					{
+						for each  staleLead in cleanupMatches
+						{
+							deleteMap = Map();
+							deleteMap.put("module","Leads");
+							deleteMap.put("id",staleLead.get("id"));
+							zoho.crm.invokeConnector("crm.delete",deleteMap);
+							resultLog = resultLog + "Removed stale Lead " + staleLead.get("id") + " for paid BD ID " + bdUserId + "\n";
+						}
+					}
 				}
 				else
 				{
@@ -2246,7 +2657,7 @@ try
 		}
 		else if((userActive == 2 || userActive == "2") && isFreeListingPlan == true)
 		{
-			try
+			try 
 			{
 				leadSearchCriteria = "(BD_Member_ID:equals:" + bdUserId + ")";
 				leadMatches = zoho.crm.searchRecords("Leads",leadSearchCriteria);
@@ -2267,7 +2678,6 @@ try
 					leadId = leadMatches.get(0).get("id");
 					leadUpdate = Map();
 					leadUpdate.put("BD_Member_ID",bdUserId);
-					leadUpdate.put("Lead_Source","IGP");
 					if(bdFirstName != null)
 					{
 						leadUpdate.put("First_Name",bdFirstName);
@@ -2308,15 +2718,27 @@ try
 						leadUpdate.put("Verified_Member",mappedVerifiedMember);
 					}
 					// -----------------------------------------
-					zoho.crm.updateRecord("Leads",leadId,leadUpdate);
-					resultLog = resultLog + "Existing Lead updated for free listing BD ID " + bdUserId + "\n";
+					// ---- FREE_LISTING_LEAD_LOG PATCH ----
+					// Name the Lead that was matched (and how) and report a
+					// rejected update, so a match on a shared email/phone/
+					// company is visible instead of looking like "nothing
+					// happened".
+					matchedLead = leadMatches.get(0);
+					leadUpdateResp = zoho.crm.updateRecord("Leads",leadId,leadUpdate);
+					if(leadUpdateResp != null && leadUpdateResp.get("status") == "error")
+					{
+						resultLog = resultLog + "WARNING: Lead update FAILED for free listing BD ID " + bdUserId + " (Lead " + leadId + ") - Zoho response: " + leadUpdateResp + "\n";
+					}
+					else
+					{
+						resultLog = resultLog + "Existing Lead updated for free listing BD ID " + bdUserId + ": Lead ID " + leadId + " '" + ifnull(matchedLead.get("Full_Name"),"") + "' (Company '" + ifnull(matchedLead.get("Company"),"") + "', Email '" + ifnull(matchedLead.get("Email"),"") + "', previous BD_Member_ID '" + ifnull(matchedLead.get("BD_Member_ID"),"") + "')\n";
+					}
 				}
 				else
 				{
 					leadCreate = Map();
 					leadCreate.put("BD_Member_ID",bdUserId);
 					leadCreate.put("Lead_Status","New Inquiry");
-					leadCreate.put("Lead_Source","IGP");
 					if(bdFirstName != null)
 					{
 						leadCreate.put("First_Name",bdFirstName);
@@ -2355,7 +2777,14 @@ try
 					}
 					// -----------------------------------------
 					newLeadResp = zoho.crm.createRecord("Leads",leadCreate);
-					resultLog = resultLog + "New Lead created as New Inquiry for free listing BD ID " + bdUserId + "\n";
+					if(newLeadResp != null && newLeadResp.get("id") != null)
+					{
+						resultLog = resultLog + "New Lead created as New Inquiry for free listing BD ID " + bdUserId + ": Lead ID " + newLeadResp.get("id") + "\n";
+					}
+					else
+					{
+						resultLog = resultLog + "WARNING: Lead create FAILED for free listing BD ID " + bdUserId + " - Zoho response: " + newLeadResp + "\n";
+					}
 				}
 			}
 			catch (leadError)
@@ -2367,6 +2796,97 @@ try
 		{
 			resultLog = resultLog + "BD ID " + bdUserId + " skipped - active: " + userActive + ", latest transaction paid: " + transactionIsPaid + ", free listing: " + isFreeListingPlan + "\n";
 		}
+		// ---- UTM_SOURCE_TRACKING PATCH (4 of 4) ----
+		// Stamp the signup's UTM values on every CRM record this member
+		// became (Individual -> Contact, Community -> Account + Contact,
+		// Business -> Lead or Contact + Deal), so channel reporting works
+		// whichever branch above ran. Runs as separate calls after the main
+		// sync so a module missing the UTM fields can never block it - it
+		// only logs a warning. First touch wins: a record that already has
+		// a UTM_Source is left alone, so later webhooks never overwrite the
+		// channel that originally brought the member in.
+		//
+		// ---- LEAD_SOURCE_FILL_ONLY PATCH (Oct 2026) ----
+		// Lead_Source is set once and never replaced. The sync above no
+		// longer writes Lead_Source anywhere; this pass only FILLS it on a
+		// Lead/Contact/Deal of this member whose Lead_Source is empty:
+		//   - the person already came in through another channel
+		//     (existingLeadSource, e.g. SalesIQ / Meta Ads) -> that value
+		//   - otherwise (a direct BD signup with no record in Zoho) -> IGP
+		// A record that already has any Lead_Source is never touched, so
+		// overlapping runs can no longer flip it back and forth.
+		if(bdUserId != null && bdUserId != "")
+		{
+			utmUpdate = Map();
+			utmUpdate.put("UTM_Source",ifnull(bdUtmValues.get("utm_source"),""));
+			utmUpdate.put("UTM_Medium",ifnull(bdUtmValues.get("utm_medium"),""));
+			utmUpdate.put("UTM_Campaign",ifnull(bdUtmValues.get("utm_campaign"),""));
+			utmUpdate.put("UTM_Content",ifnull(bdUtmValues.get("utm_content"),""));
+			for each  utmModule in {"Leads","Contacts","Accounts","Deals"}
+			{
+				try 
+				{
+					utmMatches = zoho.crm.searchRecords(utmModule,"(BD_Member_ID:equals:" + bdUserId + ")");
+					if(utmMatches != null && utmMatches.size() > 0)
+					{
+						for each  utmRec in utmMatches
+						{
+							existingUtmSource = utmRec.get("UTM_Source");
+							recordHasUtm = false;
+							if(existingUtmSource != null && existingUtmSource.toString().trim() != "")
+							{
+								recordHasUtm = true;
+							}
+							if(recordHasUtm == false && bdUtmValues.size() > 0)
+							{
+								utmResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),utmUpdate);
+								if(utmResp != null && utmResp.get("status") == "error")
+								{
+									resultLog = resultLog + "WARNING: UTM fields not saved on " + utmModule + " for BD ID " + bdUserId + " (does this module have UTM_Source/UTM_Medium/UTM_Campaign/UTM_Content?) - Zoho response: " + utmResp + "\n";
+								}
+								else
+								{
+									resultLog = resultLog + "UTM " + bdUtmValues + " saved on " + utmModule + " for BD ID " + bdUserId + "\n";
+									if(bdUtmValues.get("utm_source") != null)
+									{
+										recordHasUtm = true;
+									}
+								}
+							}
+							// ---- LEAD_SOURCE_FILL_ONLY PATCH: apply ----
+							currentLeadSource = ifnull(utmRec.get("Lead_Source"),"").toString().trim();
+							targetLeadSource = "";
+							if(currentLeadSource == "" || currentLeadSource == "-None-")
+							{
+								targetLeadSource = "IGP";
+								if(existingLeadSource != "")
+								{
+									targetLeadSource = existingLeadSource;
+								}
+							}
+							if(targetLeadSource != "" && utmModule != "Accounts")
+							{
+								leadSourceResp = zoho.crm.updateRecord(utmModule,utmRec.get("id"),{"Lead_Source":targetLeadSource});
+								if(leadSourceResp != null && leadSourceResp.get("status") == "error")
+								{
+									resultLog = resultLog + "WARNING: Lead_Source '" + targetLeadSource + "' not saved on " + utmModule + " for BD ID " + bdUserId + " (is it in this module's Lead Source picklist?) - Zoho response: " + leadSourceResp + "\n";
+								}
+								else
+								{
+									resultLog = resultLog + "Lead_Source set to '" + targetLeadSource + "' on " + utmModule + " for BD ID " + bdUserId + "\n";
+								}
+							}
+							// -----------------------------------------
+						}
+					}
+				}
+				catch (utmError)
+				{
+					resultLog = resultLog + "WARNING: UTM stamp failed on " + utmModule + " for BD ID " + bdUserId + ": " + utmError + "\n";
+				}
+			}
+		}
+		// -----------------------------------------
 	}
 	else
 	{
